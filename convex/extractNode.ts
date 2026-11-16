@@ -11,7 +11,7 @@ import { extractionModels, extractionVendor } from "./lib/config";
 import {
   ExtractionSchema,
   SYSTEM_PROMPT,
-  draftFromExtraction,
+  draftsFromExtraction,
   extractWithFallback,
   type ExtractionImage,
   type ModelCaller,
@@ -204,8 +204,14 @@ export const run = internalAction({
   args: { recipeId: v.id("recipes"), startedAt: v.number() },
   returns: v.null(),
   handler: async (ctx, { recipeId, startedAt }) => {
-    const fail = (error: string) =>
-      ctx.runMutation(internal.recipes.failExtraction, { recipeId, startedAt, error });
+    // Drafts this run writes to: the one photographed, plus one per further
+    // recipe on a spread (#21). A failure fails them all.
+    let drafts = [recipeId];
+    const fail = async (error: string) => {
+      for (const id of drafts) {
+        await ctx.runMutation(internal.recipes.failExtraction, { recipeId: id, startedAt, error });
+      }
+    };
     try {
       const storageIds = await ctx.runQuery(internal.recipes.extractionInput, {
         recipeId,
@@ -226,21 +232,25 @@ export const run = internalAction({
         await fail(outcome.error);
         return null;
       }
-      const draft = draftFromExtraction(outcome.result);
+      const [draft, ...others] = draftsFromExtraction(outcome.result);
       const applied = await ctx.runMutation(internal.recipes.applyExtraction, {
         recipeId,
         startedAt,
         model: outcome.model,
         draft,
+        others,
       });
       if (applied === null) return null;
-      // Stage "Páruji suroviny": only names with no exact match go to the model.
-      const lines = draft.lines.slice(0, MAX_LINES).map((l) => ({
-        name: l.name ?? "",
-        unit: l.unit,
-        raw: l.raw,
-      }));
-      const items = unmatchedItems(lines, applied.catalogue);
+      drafts = applied.written.map((w) => w.recipeId);
+      // Stage "Páruji suroviny": only names with no exact match go to the
+      // model, in one call for every recipe on the photo.
+      const all = [draft, ...others];
+      const linesOf = (index: number) =>
+        all[index].lines.slice(0, MAX_LINES).map((l) => ({ name: l.name ?? "", unit: l.unit, raw: l.raw }));
+      const items = unmatchedItems(
+        applied.written.flatMap((w) => linesOf(w.index)),
+        applied.catalogue,
+      );
       // Try the model that read the recipe first; a failure falls back to default guesses.
       const models = [outcome.model, ...extractionModels().filter((m) => m !== outcome.model)];
       const matched = items.length
@@ -250,13 +260,15 @@ export const run = internalAction({
             matchUserPrompt(items, applied.catalogue),
           )
         : null;
-      await ctx.runMutation(internal.recipes.applyMatching, {
-        recipeId,
-        startedAt,
-        lines,
-        items,
-        result: matched?.result ?? null,
-      });
+      for (const w of applied.written) {
+        await ctx.runMutation(internal.recipes.applyMatching, {
+          recipeId: w.recipeId,
+          startedAt,
+          lines: linesOf(w.index),
+          items,
+          result: matched?.result ?? null,
+        });
+      }
     } catch (err) {
       await fail(err instanceof Error ? err.message : String(err));
     }

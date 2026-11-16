@@ -43,6 +43,9 @@ export function Sheet({
   );
 }
 
+/** Where a recipe sits on a spread photo, as the AI reports it. */
+export const PAGE_SIDE: Record<string, string> = { left: "levá strana", right: "pravá strana" };
+
 export const STAGES = [
   { id: "upload", label: "Nahrávám fotky" },
   { id: "read", label: "Čtu recept" },

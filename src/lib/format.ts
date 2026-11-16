@@ -30,6 +30,13 @@ export function portionsLabel(n: number): string {
   return `${n} porcí`;
 }
 
+/** "1 recept", "2 recepty", "5 receptů". */
+export function recipesLabel(n: number): string {
+  if (n === 1) return "1 recept";
+  if (n >= 2 && n <= 4) return `${n} recepty`;
+  return `${n} receptů`;
+}
+
 export const CATEGORY_LABEL = { main: "Hlavní jídlo", special: "Speciál" } as const;
 
 const MESSAGES: Record<string, string> = {
@@ -49,6 +56,8 @@ const MESSAGES: Record<string, string> = {
   CANNOT_RETRY: "Recept se právě čte.",
   NOT_A_DRAFT: "Recept je už uložený.",
   CHECKS_PENDING: "Nejdřív projdi, co je ke kontrole.",
+  ALREADY_CHOSEN: "Recepty z fotky už jsou vybrané.",
+  CHOOSE_FIRST: "Nejdřív vyber, které recepty z fotky chceš.",
 };
 
 /** Czech message for a failed Convex call. */

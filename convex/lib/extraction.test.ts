@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   USER_PROMPT,
   draftFromExtraction,
+  draftsFromExtraction,
   extractWithFallback,
   userPrompt,
   type Extraction,
@@ -178,4 +179,24 @@ describe("draftFromExtraction", () => {
 test("several photos are read as consecutive pages of one recipe", () => {
   expect(userPrompt(1)).toBe(USER_PROMPT);
   expect(userPrompt(3)).toMatch(/\(3\) jsou po sobě jdoucí stránky jednoho receptu/);
+});
+
+describe("draftsFromExtraction (#21)", () => {
+  test("every recipe on a spread becomes a draft, with its page side", () => {
+    const drafts = draftsFromExtraction({
+      recipes: [recipe({ pageSide: "left" }), recipe({ name: "Polévka", pageSide: "right" })],
+    });
+    expect(drafts.map((d) => [d.name, d.pageSide])).toEqual([
+      ["Kuře na paprice", "left"],
+      ["Polévka", "right"],
+    ]);
+  });
+
+  test("drops empty recipes, but keeps one if all are empty", () => {
+    const empty = recipe({ name: " ", ingredientGroups: [], steps: [] });
+    expect(draftsFromExtraction({ recipes: [empty, recipe()] }).map((d) => d.name)).toEqual([
+      "Kuře na paprice",
+    ]);
+    expect(draftsFromExtraction({ recipes: [empty, empty] })).toHaveLength(1);
+  });
 });

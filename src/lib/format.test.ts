@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { ConvexError } from "convex/values";
-import { errorMessage, formatAmount, parseAmount, portionsLabel } from "./format";
+import { errorMessage, formatAmount, parseAmount, portionsLabel, recipesLabel } from "./format";
 import { fitWithin } from "./photo";
 
 describe("amounts", () => {
@@ -28,6 +28,7 @@ describe("amounts", () => {
 
   test("portions are declined", () => {
     expect([1, 2, 4, 5].map(portionsLabel)).toEqual(["1 porce", "2 porce", "4 porce", "5 porcí"]);
+    expect([1, 2, 5].map(recipesLabel)).toEqual(["1 recept", "2 recepty", "5 receptů"]);
   });
 });
 

@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { MAX_PHOTOS } from "@convex/lib/checks";
+import { NeedsInternet } from "~/components/recipes/screens";
 import { ScanView, TopBar } from "~/components/recipes/ui";
 import { errorMessage } from "~/lib/format";
 import { resizeToJpeg, uploadJpeg } from "~/lib/photo";
 import { movePage, removePage } from "~/lib/pages";
+import { useOnline } from "~/pwa";
 
 type CaptureSearch = {
   /** "Vyfotit další stránku": add pages to this Draft Recipe and read it again. */
@@ -28,7 +30,8 @@ type Photo = { id: number; jpeg: Blob; url: string };
  * and "＋ Další stránka"; with 2+ pages, thumbnails to reorder and remove.
  * "Přečíst recept" sends all pages as one Draft Recipe, or (from "Recept
  * pokračuje") adds them to the draft, which is then read again from all pages.
- * Gallery picks come with #21.
+ * "🖼 Z galerie" (#21) adds the picked photos (several at once) as pages.
+ * Reading needs internet; offline, photos can still be taken (#13).
  */
 function Capture() {
   const { recept } = Route.useSearch();
@@ -37,7 +40,9 @@ function Capture() {
   const createDraft = useMutation(api.recipes.createDraft);
   const addPages = useMutation(api.recipes.addPages);
   const navigate = useNavigate();
+  const online = useOnline();
   const camera = useRef<HTMLInputElement>(null);
+  const gallery = useRef<HTMLInputElement>(null);
   /** Whether the next photo replaces the shown page ("Vyfotit znovu") or adds one. */
   const replacing = useRef(false);
   const nextId = useRef(0);
@@ -81,6 +86,31 @@ function Capture() {
       }
     } catch {
       setError("Fotku se nepodařilo načíst. Zkus ji vyfotit znovu.");
+    } finally {
+      setPhase("pick");
+    }
+  }
+
+  /** Gallery: the picked photos are added as pages after the last one. */
+  async function onGallery(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setError(null);
+    if (files.length > room) setError(`Recept může mít nejvýš ${MAX_PHOTOS} stránek, přidám jen ${room}.`);
+    setPhase("preparing");
+    try {
+      const added: Photo[] = [];
+      for (const file of files.slice(0, Math.max(0, room))) {
+        const jpeg = await resizeToJpeg(file);
+        added.push({ id: nextId.current++, jpeg, url: URL.createObjectURL(jpeg) });
+      }
+      if (added.length) {
+        setShown(photos.length + added.length - 1);
+        setPhotos((ps) => [...ps, ...added]);
+      }
+    } catch {
+      setError("Fotku z galerie se nepodařilo načíst. Zkus jinou.");
     } finally {
       setPhase("pick");
     }
@@ -150,6 +180,8 @@ function Capture() {
         hidden
         onChange={onPicked}
       />
+      <input ref={gallery} type="file" accept="image/*" multiple hidden onChange={onGallery} />
+      {!online && <NeedsInternet />}
       {target && (
         <p className="muted small nomargin">
           Přidáváš stránku k „{target.name || "receptu"}“ (už má {existing} str.). Recept se
@@ -189,20 +221,32 @@ function Capture() {
               ＋ Další stránka
             </button>
           </div>
+          <button className="btn ghost" onClick={() => gallery.current?.click()} disabled={busy || room <= 0}>
+            🖼 Z galerie
+          </button>
           {room <= 0 && <p className="muted small nomargin">Víc stránek recept mít nemůže.</p>}
         </>
       ) : (
-        <button className="viewfinder" onClick={() => openCamera(false)} disabled={busy}>
-          <span aria-hidden="true">📷</span>
-          {phase === "preparing" ? "Připravuji fotku…" : "Namiř na stránku receptu a vyfoť ji"}
-        </button>
+        <>
+          <button className="viewfinder" onClick={() => openCamera(false)} disabled={busy}>
+            <span aria-hidden="true">📷</span>
+            {phase === "preparing" ? "Připravuji fotku…" : "Namiř na stránku receptu a vyfoť ji"}
+          </button>
+          <button className="btn" onClick={() => gallery.current?.click()} disabled={busy || room <= 0}>
+            🖼 Vybrat z galerie
+          </button>
+        </>
       )}
       {phase === "preparing" && current && <p className="muted small nomargin">Připravuji fotku…</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="bottombar">
         {current ? (
-          <button className="btn primary grow" onClick={read} disabled={busy}>
-            {photos.length > 1 ? `Přečíst recept (${photos.length} str.) ›` : "Přečíst recept ›"}
+          <button className="btn primary grow" onClick={read} disabled={busy || !online}>
+            {!online
+              ? "Přečíst recept (bez připojení)"
+              : photos.length > 1
+                ? `Přečíst recept (${photos.length} str.) ›`
+                : "Přečíst recept ›"}
           </button>
         ) : (
           <button className="btn primary grow" onClick={() => openCamera(false)} disabled={busy}>

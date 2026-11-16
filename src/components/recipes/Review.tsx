@@ -10,6 +10,7 @@ import {
   formatAmount,
   parseAmount,
   portionsLabel,
+  recipesLabel,
 } from "~/lib/format";
 import { defaultProposal, ingredientKey } from "@convex/lib/ingredients";
 import {
@@ -21,7 +22,7 @@ import {
   type NewIngredientFields,
 } from "./Ingredients";
 import { QueueCard, checkQueue } from "./CheckQueue";
-import { PhotoPane, Sheet, TopBar } from "./ui";
+import { PAGE_SIDE, PhotoPane, Sheet, TopBar } from "./ui";
 
 export type RecipeView = NonNullable<FunctionReturnType<typeof api.recipes.get>>;
 
@@ -53,6 +54,14 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
   const confirm = useMutation(api.recipes.confirm);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [skipped, setSkipped] = useState(false);
+  const others = (recipe.spread?.drafts.length ?? 1) - 1;
+  const side = recipe.spread?.pageSide ? PAGE_SIDE[recipe.spread.pageSide] : undefined;
+  // A recipe from a photo with several (#21): say which one this is.
+  const fromPhoto = others > 0 && (
+    <p className="muted small">
+      Z této fotky je ještě {recipesLabel(others)}{side ? `; tohle je ${side}` : ""}.
+    </p>
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const close = () => setSheet(null);
@@ -64,6 +73,7 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
       <section className="page">
         <TopBar title={recipe.name || "Kontrola"} />
         <PhotoPane photos={recipe.photos} />
+        {fromPhoto}
         <p className="qcount">
           Ke kontrole ještě {queue.length}
           <button className="link inline" onClick={() => setSkipped(true)}>
@@ -94,7 +104,7 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
 
   return (
     <section className="page with-bar">
-      <TopBar title={recipe.name || "Shrnutí"} />
+      <TopBar title={recipe.name || (recipe.photos.length ? "Shrnutí" : "Nový recept")} />
       <PhotoPane photos={recipe.photos} />
       {queue.length > 0 ? (
         <div className="banner warn frow">
@@ -106,6 +116,7 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
       ) : (
         <p className="banner">✓ Vše zkontrolováno. Ťukni na cokoli pro úpravu.</p>
       )}
+      {fromPhoto}
 
       <div className="rcard">
         <button className="sumline" onClick={() => setSheet({ kind: "basics" })}>

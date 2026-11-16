@@ -9,8 +9,11 @@ import { memberOf, type Member } from "./lib/membership";
 import {
   addLineFor,
   addPagesFor,
+  chooseFromPhotoFor,
   confirmFor,
+  createManualFor,
   dismissCheckFor,
+  fillManuallyFor,
   setServingsFor,
   lineViewsFor,
   mapToIngredientFor,
@@ -424,7 +427,7 @@ describe("matching Ingredients and new Ingredients", () => {
     const applied = await t.mutation(internal.recipes.applyExtraction, {
       recipeId, startedAt: run, model: "m", draft: { ...DRAFT, lines: LINES },
     });
-    expect(applied).toEqual({ catalogue: ["cibule"] });
+    expect(applied).toEqual({ catalogue: ["cibule"], written: [{ recipeId, index: 0 }] });
     expect(await stage()).toMatchObject({ state: "pending", stage: "match", model: "m" });
     await t.mutation(internal.recipes.applyMatching, {
       recipeId, startedAt: run, lines: [], items: [], result: null,
@@ -677,5 +680,193 @@ describe("check queue and more pages (#20)", () => {
     await expect(add([p])).rejects.toThrow(/NOT_A_DRAFT/);
     const b = await newMember(t, "b@example.com");
     await expect(t.run((ctx) => addPagesFor(ctx, b, { recipeId, storageIds: [p] }))).rejects.toThrow(/NOT_FOUND/);
+  });
+});
+
+describe("edge flows (#21)", () => {
+  test("'✎ Ručně' starts an empty draft with no photo that can be filled in and saved", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const recipeId = await t.run((ctx) => createManualFor(ctx, member));
+    const recipe = await t.run((ctx) => ctx.db.get("recipes", recipeId));
+    expect(recipe).toMatchObject({ status: "draft", name: "", steps: [] });
+    expect(recipe!.extraction).toBeUndefined();
+    await t.run((ctx) =>
+      addLineFor(ctx, member, { recipeId, line: { raw: "2 vejce", amount: 2, ingredientName: "vejce" } }),
+    );
+    await t.run((ctx) => updateBasicsFor(ctx, member, { recipeId, name: "Omeleta", category: "main", baseServings: 2 }));
+    await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get("recipes", recipeId))!.status).toBe("confirmed");
+      expect((await ctx.db.query("ingredients").collect()).map((i) => i.name)).toEqual(["vejce"]);
+      expect(await ctx.db.query("recipePhotos").collect()).toEqual([]);
+    });
+  });
+
+  test("'Vyplnit ručně' after a failed reading keeps the photo and opens the summary", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const photo = await storePhoto(t);
+    const recipeId = await t.run((ctx) => createDraftFor(ctx, member, [photo]));
+    // Not while the AI is still reading.
+    await expect(t.run((ctx) => fillManuallyFor(ctx, member, { recipeId }))).rejects.toThrow(/CANNOT_RETRY/);
+    const run = await startedAt(t, recipeId);
+    await t.mutation(internal.recipes.failExtraction, { recipeId, startedAt: run, error: "blur" });
+    await t.run((ctx) => fillManuallyFor(ctx, member, { recipeId }));
+    const recipe = await t.run((ctx) => ctx.db.get("recipes", recipeId));
+    expect(recipe!.extraction).toBeUndefined();
+    // A late result of the old run is dropped.
+    await t.mutation(internal.recipes.applyExtraction, { recipeId, startedAt: run, model: "m", draft: DRAFT });
+    expect((await t.run((ctx) => ctx.db.get("recipes", recipeId)))!.name).toBe("");
+    await t.run((ctx) => updateBasicsFor(ctx, member, { recipeId, name: "Bábovka", category: "main", baseServings: 8 }));
+    await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
+    await t.run(async (ctx) => {
+      expect(await ctx.db.query("recipePhotos").collect()).toHaveLength(1);
+      expect(await ctx.storage.getUrl(photo)).not.toBeNull();
+    });
+  });
+
+  test("'Vyplnit ručně' also ends a lost run", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const recipeId = await t.run(async (ctx) => createDraftFor(ctx, member, [await ctx.storage.store(new Blob(["x"]))]));
+    vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+    await t.run((ctx) => fillManuallyFor(ctx, member, { recipeId }));
+    await expect(t.run((ctx) => fillManuallyFor(ctx, member, { recipeId }))).rejects.toThrow(/CANNOT_RETRY/);
+  });
+
+  /** A photo of a spread read as two recipes; returns both drafts. */
+  async function readSpread(t: T, member: Member) {
+    const photo = await storePhoto(t);
+    const recipeId = await t.run((ctx) => createDraftFor(ctx, member, [photo]));
+    const run = await startedAt(t, recipeId);
+    const soup = {
+      name: "Polévka",
+      baseServings: 4,
+      steps: ["Uvaříme."],
+      lines: [{ raw: "1 l vody", amount: 1, unit: "l" }],
+    };
+    const applied = await t.mutation(internal.recipes.applyExtraction, {
+      recipeId,
+      startedAt: run,
+      model: "m",
+      draft: { ...DRAFT, pageSide: "left" },
+      others: [{ ...soup, pageSide: "right" }],
+    });
+    expect(applied!.written.map((w) => w.index)).toEqual([0, 1]);
+    for (const w of applied!.written) {
+      const lines = w.index === 0 ? DRAFT.lines : soup.lines;
+      await t.mutation(internal.recipes.applyMatching, {
+        recipeId: w.recipeId,
+        startedAt: run,
+        lines: lines.map((l) => ({ name: "sůl", raw: l.raw })),
+        items: [],
+        result: null,
+      });
+    }
+    return { photo, first: recipeId, second: applied!.written[1].recipeId, run };
+  }
+
+  test("a photo with several recipes becomes one draft per recipe, sharing the photo", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { photo, first, second } = await readSpread(t, member);
+    await t.run(async (ctx) => {
+      const a = (await ctx.db.get("recipes", first))!;
+      const b = (await ctx.db.get("recipes", second))!;
+      expect(a.spread).toEqual({ group: first, index: 0, pageSide: "left", choosing: true });
+      expect(b).toMatchObject({ name: "Polévka", status: "draft", extraction: { state: "done", model: "m" } });
+      expect(b.spread).toEqual({ group: first, index: 1, pageSide: "right", choosing: true });
+      const photos = await ctx.db.query("recipePhotos").collect();
+      expect(photos.map((p) => [p.recipe, p.storageId])).toEqual([[first, photo], [second, photo]]);
+    });
+    // Saving waits until the user picks.
+    await t.run((ctx) => updateBasicsFor(ctx, member, { recipeId: first, name: "Kuře", category: "main" }));
+    await expect(t.run((ctx) => confirmFor(ctx, member, { recipeId: first }))).rejects.toThrow(/CHOOSE_FIRST/);
+  });
+
+  test("picking keeps the chosen drafts, discards the rest, and the photo stays while used", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { photo, first, second } = await readSpread(t, member);
+    const next = await t.run((ctx) => chooseFromPhotoFor(ctx, member, { recipeId: first, keep: [second] }));
+    expect(next).toBe(second);
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get("recipes", first)).toBeNull();
+      expect((await ctx.db.get("recipes", second))!.spread!.choosing).toBe(false);
+      expect(await ctx.storage.getUrl(photo)).not.toBeNull();
+    });
+    await expect(
+      t.run((ctx) => chooseFromPhotoFor(ctx, member, { recipeId: second, keep: [second] })),
+    ).rejects.toThrow(/ALREADY_CHOSEN/);
+    await t.run((ctx) => discardFor(ctx, member, { recipeId: second }));
+    expect(await t.run((ctx) => ctx.storage.getUrl(photo))).toBeNull();
+  });
+
+  test("keeping both: saving one offers the next from the photo", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { photo, first, second } = await readSpread(t, member);
+    expect(await t.run((ctx) => chooseFromPhotoFor(ctx, member, { recipeId: second, keep: [second, first] }))).toBe(first);
+    await t.run((ctx) => confirmFor(ctx, member, { recipeId: first }));
+    // Discarding the other keeps the file: the saved Recipe still shows it.
+    await t.run((ctx) => discardFor(ctx, member, { recipeId: second }));
+    expect(await t.run((ctx) => ctx.storage.getUrl(photo))).not.toBeNull();
+  });
+
+  test("keeping none discards them all; a recipe from another photo can't be kept", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { photo, first, second } = await readSpread(t, member);
+    const { recipeId: other } = await readDraft(t, member);
+    await expect(
+      t.run((ctx) => chooseFromPhotoFor(ctx, member, { recipeId: first, keep: [other] })),
+    ).rejects.toThrow(/NOT_FOUND/);
+    expect(await t.run((ctx) => chooseFromPhotoFor(ctx, member, { recipeId: first, keep: [] }))).toBeNull();
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get("recipes", first)).toBeNull();
+      expect(await ctx.db.get("recipes", second)).toBeNull();
+      expect(await ctx.storage.getUrl(photo)).toBeNull();
+    });
+  });
+
+  test("re-reading a draft from a spread keeps to its own recipe", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { second, run } = await readSpread(t, member);
+    await t.run((ctx) =>
+      ctx.db.patch("recipes", second, { extraction: { state: "failed", startedAt: run } }),
+    );
+    vi.setSystemTime(Date.now() + 1000);
+    await t.run((ctx) => retryExtractionFor(ctx, member, { recipeId: second }));
+    const again = await startedAt(t, second);
+    const applied = await t.mutation(internal.recipes.applyExtraction, {
+      recipeId: second,
+      startedAt: again,
+      model: "m",
+      draft: { ...DRAFT, pageSide: "left" },
+      others: [{ name: "Polévka II", steps: [], lines: [], pageSide: "right" }],
+    });
+    expect(applied!.written).toEqual([{ recipeId: second, index: 1 }]);
+    expect((await t.run((ctx) => ctx.db.get("recipes", second)))!.name).toBe("Polévka II");
+    expect(await t.run((ctx) => ctx.db.query("recipes").collect())).toHaveLength(2);
+  });
+
+  test("a single recipe re-read after review never splits", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId } = await readDraft(t, member);
+    await t.run((ctx) =>
+      ctx.db.patch("recipes", recipeId, { extraction: { state: "pending", startedAt: 1 } }),
+    );
+    const applied = await t.mutation(internal.recipes.applyExtraction, {
+      recipeId,
+      startedAt: 1,
+      model: "m",
+      draft: DRAFT,
+      others: [{ name: "Polévka", steps: [], lines: [] }],
+    });
+    expect(applied!.written).toHaveLength(1);
+    expect(await t.run((ctx) => ctx.db.query("recipes").collect())).toHaveLength(1);
   });
 });
