@@ -347,3 +347,28 @@ textarea.finput { min-height: 76px; resize: vertical; }
 }
 .ingrow:first-child { border-top: 0; }
 .ingrow b { font-weight: 600; }
+
+/* ---------- leftovers and specials (#24) ---------- */
+.plan { padding-bottom: 88px; }
+.dots i.s { background: #8b5cf6; }
+.dchip.on .dots i.s { background: #e9ddff; }
+.mcard.left { border: 1.5px dashed #d8a46a; background: #fffdf9; gap: 6px; }
+.mcard.special { background: #f8f4ff; border-color: #e4d8fb; }
+.mcard .occ { font-size: .85rem; color: #6d4bb0; font-weight: 600; }
+.cook { font-weight: 700; color: var(--green); }
+.qchip {
+  min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff;
+  font: inherit; font-size: .85rem; color: var(--fg); cursor: pointer;
+}
+.qchip.on { background: #eef3ec; border-color: var(--green); color: var(--green); font-weight: 700; }
+.qchip:disabled { opacity: .6; }
+.lblock { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.lrow { display: flex; align-items: center; gap: 8px; }
+.lrow > span:first-child { flex: 1; }
+.total { margin: 0; background: #f1eee8; border-radius: 10px; padding: 10px 12px; font-size: .9rem; }
+.fab {
+  position: fixed; z-index: 6; right: max(16px, calc(50% - 304px));
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  min-height: 48px; padding: 0 20px; border-radius: 999px; border: 0; background: var(--green); color: #fff;
+  font: inherit; font-weight: 700; box-shadow: 0 4px 14px rgba(0, 0, 0, .22); cursor: pointer;
+}

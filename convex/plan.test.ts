@@ -6,7 +6,16 @@ import schema from "./schema";
 import { modules } from "./test.setup";
 import { createHouseholdFor } from "./households";
 import { memberOf, type Member } from "./lib/membership";
-import { addFor, rangeFor, removeFor, setPortionsFor } from "./plan";
+import {
+  addFor,
+  addLeftoverFor,
+  rangeFor,
+  removeFor,
+  removeLeftoverFor,
+  setLeftoverPortionsFor,
+  setOccasionFor,
+  setPortionsFor,
+} from "./plan";
 
 type T = ReturnType<typeof convexTest>;
 
@@ -180,6 +189,173 @@ describe("setPortionsFor / removeFor", () => {
       t.run((ctx) => setPortionsFor(ctx, a, { mealId, portions: 2 })),
     ).rejects.toThrow(/NOT_FOUND/);
     await expect(t.run((ctx) => removeFor(ctx, a, { mealId }))).rejects.toThrow(/NOT_FOUND/);
+  });
+});
+
+describe("Specials", () => {
+  test("a day holds several Specials with their Occasion", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const cake = await addRecipe(t, m, { name: "Dort" });
+    const date = "2026-11-21";
+    await t.run((ctx) =>
+      addFor(ctx, m, { date, slot: "special", recipeId: cake, occasion: "  Ondra – narozeniny " }),
+    );
+    await t.run((ctx) => addFor(ctx, m, { date, slot: "special", recipeId: cake, occasion: "" }));
+    await t.run((ctx) => addFor(ctx, m, { date, slot: "lunch", recipeId: cake, occasion: "x" }));
+    const { meals } = await range(t, m, date, date);
+    const specials = meals.filter((x) => x.slot === "special");
+    expect(specials.map((x) => [x.order, x.occasion])).toEqual([
+      [0, "Ondra – narozeniny"],
+      [1, undefined],
+    ]);
+    expect(meals.find((x) => x.slot === "lunch")?.occasion).toBeUndefined();
+  });
+
+  test("the Occasion can be edited, only on a Special", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const r = await addRecipe(t, m);
+    const sp = await t.run((ctx) =>
+      addFor(ctx, m, { date: "2026-11-21", slot: "special", recipeId: r }),
+    );
+    await t.run((ctx) => setOccasionFor(ctx, m, { mealId: sp, occasion: "Vánoce" }));
+    expect((await t.run((ctx) => ctx.db.get("plannedMeals", sp)))?.occasion).toBe("Vánoce");
+    await t.run((ctx) => setOccasionFor(ctx, m, { mealId: sp, occasion: " " }));
+    expect((await t.run((ctx) => ctx.db.get("plannedMeals", sp)))?.occasion).toBeUndefined();
+    await expect(
+      t.run((ctx) => setOccasionFor(ctx, m, { mealId: sp, occasion: "x".repeat(81) })),
+    ).rejects.toThrow(/INVALID_OCCASION/);
+    const lunch = await t.run((ctx) =>
+      addFor(ctx, m, { date: "2026-11-21", slot: "lunch", recipeId: r }),
+    );
+    await expect(
+      t.run((ctx) => setOccasionFor(ctx, m, { mealId: lunch, occasion: "x" })),
+    ).rejects.toThrow(/NOT_A_SPECIAL/);
+  });
+});
+
+describe("Leftover Portions", () => {
+  async function setup() {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t, "a@example.com", 4);
+    const recipeId = await addRecipe(t, m, { name: "Guláš" });
+    const mealId = await t.run((ctx) =>
+      addFor(ctx, m, { date: "2026-11-17", slot: "dinner", recipeId }),
+    );
+    return { t, m, recipeId, mealId };
+  }
+
+  test("covers a later slot with the Household default Portions", async () => {
+    const { t, m, recipeId, mealId } = await setup();
+    const id = await t.run((ctx) =>
+      addLeftoverFor(ctx, m, { mealId, date: "2026-11-18", slot: "lunch" }),
+    );
+    const { leftovers } = await range(t, m, "2026-11-18", "2026-11-18");
+    expect(leftovers).toEqual([
+      {
+        _id: id,
+        date: "2026-11-18",
+        slot: "lunch",
+        order: 0,
+        portions: 4,
+        source: {
+          _id: mealId,
+          date: "2026-11-17",
+          slot: "dinner",
+          recipe: { _id: recipeId, name: "Guláš" },
+        },
+      },
+    ]);
+  });
+
+  test("is idempotent per target slot", async () => {
+    const { t, m, mealId } = await setup();
+    const args = { mealId, date: "2026-11-19", slot: "dinner" as const };
+    const a = await t.run((ctx) => addLeftoverFor(ctx, m, args));
+    const b = await t.run((ctx) => addLeftoverFor(ctx, m, args));
+    expect(b).toBe(a);
+  });
+
+  test("only a later Lunch/Dinner, never from a Special", async () => {
+    const { t, m, recipeId, mealId } = await setup();
+    for (const [date, slot] of [
+      ["2026-11-17", "dinner"],
+      ["2026-11-17", "lunch"],
+      ["2026-11-16", "dinner"],
+    ] as const) {
+      await expect(
+        t.run((ctx) => addLeftoverFor(ctx, m, { mealId, date, slot })),
+      ).rejects.toThrow(/INVALID_LEFTOVER/);
+    }
+    const sp = await t.run((ctx) =>
+      addFor(ctx, m, { date: "2026-11-17", slot: "special", recipeId }),
+    );
+    await expect(
+      t.run((ctx) => addLeftoverFor(ctx, m, { mealId: sp, date: "2026-11-18", slot: "lunch" })),
+    ).rejects.toThrow(/INVALID_LEFTOVER/);
+  });
+
+  test("shares the slot order with Planned Meals", async () => {
+    const { t, m, recipeId, mealId } = await setup();
+    const date = "2026-11-18";
+    await t.run((ctx) => addFor(ctx, m, { date, slot: "lunch", recipeId }));
+    await t.run((ctx) => addLeftoverFor(ctx, m, { mealId, date, slot: "lunch" }));
+    await t.run((ctx) => addFor(ctx, m, { date, slot: "lunch", recipeId }));
+    const { meals, leftovers } = await range(t, m, date, date);
+    expect(meals.map((x) => x.order)).toEqual([0, 2]);
+    expect(leftovers.map((x) => x.order)).toEqual([1]);
+  });
+
+  test("range includes a meal's leftovers past the range, and leftovers whose meal is before it", async () => {
+    const { t, m, mealId } = await setup();
+    await t.run((ctx) => addLeftoverFor(ctx, m, { mealId, date: "2026-11-20", slot: "lunch" }));
+    const meal = await range(t, m, "2026-11-17", "2026-11-17");
+    expect(meal.leftovers.map((l) => l.date)).toEqual(["2026-11-20"]);
+    const later = await range(t, m, "2026-11-20", "2026-11-20");
+    expect(later.meals).toEqual([]);
+    expect(later.leftovers[0].source._id).toBe(mealId);
+  });
+
+  test("Portions change within limits; Zrušit removes it", async () => {
+    const { t, m, mealId } = await setup();
+    const leftoverId = await t.run((ctx) =>
+      addLeftoverFor(ctx, m, { mealId, date: "2026-11-18", slot: "lunch" }),
+    );
+    await t.run((ctx) => setLeftoverPortionsFor(ctx, m, { leftoverId, portions: 2 }));
+    expect((await t.run((ctx) => ctx.db.get("leftoverPortions", leftoverId)))?.portions).toBe(2);
+    await expect(
+      t.run((ctx) => setLeftoverPortionsFor(ctx, m, { leftoverId, portions: 0 })),
+    ).rejects.toThrow(/INVALID_PORTIONS/);
+    await t.run((ctx) => removeLeftoverFor(ctx, m, { leftoverId }));
+    await t.run((ctx) => removeLeftoverFor(ctx, m, { leftoverId })); // already gone is fine
+    expect((await range(t, m, "2026-11-17", "2026-11-18")).leftovers).toEqual([]);
+  });
+
+  test("removing the meal removes its Leftover Portions", async () => {
+    const { t, m, mealId } = await setup();
+    await t.run((ctx) => addLeftoverFor(ctx, m, { mealId, date: "2026-11-18", slot: "lunch" }));
+    await t.run((ctx) => addLeftoverFor(ctx, m, { mealId, date: "2026-11-19", slot: "dinner" }));
+    await t.run((ctx) => removeFor(ctx, m, { mealId }));
+    const left = await t.run((ctx) => ctx.db.query("leftoverPortions").collect());
+    expect(left).toEqual([]);
+  });
+
+  test("another Household's meal or leftover can't be touched", async () => {
+    const { t, m, mealId } = await setup();
+    const other = await newMember(t, "b@example.com");
+    const leftoverId = await t.run((ctx) =>
+      addLeftoverFor(ctx, m, { mealId, date: "2026-11-18", slot: "lunch" }),
+    );
+    await expect(
+      t.run((ctx) => addLeftoverFor(ctx, other, { mealId, date: "2026-11-18", slot: "dinner" })),
+    ).rejects.toThrow(/NOT_FOUND/);
+    await expect(
+      t.run((ctx) => setLeftoverPortionsFor(ctx, other, { leftoverId, portions: 2 })),
+    ).rejects.toThrow(/NOT_FOUND/);
+    await expect(
+      t.run((ctx) => removeLeftoverFor(ctx, other, { leftoverId })),
+    ).rejects.toThrow(/NOT_FOUND/);
   });
 });
 
