@@ -211,7 +211,10 @@ export default defineSchema({
    * while unchecked; Manual Shopping Items have no Ingredient or sources.
    * `amount`/`unit` is the total in a base unit (g, ml, ks) or a unit that
    * doesn't convert; `moreAmounts` holds clashing kinds ("+ 1 hrnek", #6).
-   * No amount = vague ("—").
+   * No amount = vague ("—"). Checked items are frozen (#28): `topUp` marks
+   * an item bought on top of them when the need rose (amount = the
+   * difference, `note` "navýšení: …"); `note` "už nepotřeba…" marks a checked
+   * item whose meals need less or nothing now.
    */
   shoppingItems: defineTable({
     household: v.id("households"),
@@ -226,6 +229,7 @@ export default defineSchema({
     sourceMeals: v.array(v.id("plannedMeals")),
     pinned: v.boolean(),
     note: v.optional(v.string()),
+    topUp: v.optional(v.boolean()),
   })
     .index("by_household", ["household"])
     .index("by_trip", ["trip"]),

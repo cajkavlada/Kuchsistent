@@ -186,3 +186,67 @@ export function tripFor<T extends TripLike>(
   }
   return undefined;
 }
+
+// ---------- frozen ticks (#28) ----------
+
+/** Note on a checked item whose meals no longer need it (all or part of it). */
+export const NOT_NEEDED = "už nepotřeba";
+
+/** Prefix of the note on a top-up item bought for a risen need. */
+export const TOP_UP = "navýšení";
+
+/** "1 porci", "3 porce", "6 porcí" (after "na"). */
+export function portionsPhrase(n: number): string {
+  const word = n === 1 ? "porci" : n >= 2 && n <= 4 && Number.isInteger(n) ? "porce" : "porcí";
+  return `${czNumber(n, 1)} ${word}`;
+}
+
+/** Parts by kind (or by unknown unit), in base units, keeping first-seen order. */
+function canon(parts: Part[]): Map<string, { kind: MeasureKind | null; unit: string; value: number }> {
+  const out = new Map<string, { kind: MeasureKind | null; unit: string; value: number }>();
+  for (const p of parts) {
+    const info = unitInfo(p.unit);
+    const key = info ? info.kind : `u:${normalizeUnit(p.unit)}`;
+    const unit = info ? BASE_UNIT[info.kind] : p.unit;
+    const b = out.get(key) ?? { kind: info?.kind ?? null, unit, value: 0 };
+    b.value += p.amount * (info?.factor ?? 1);
+    out.set(key, b);
+  }
+  return out;
+}
+
+function roundDiff(kind: MeasureKind | null, value: number): number {
+  if (kind === "count" || kind === null) return Math.ceil(value - 1e-9);
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * What a frozen (checked) purchase `have` lacks against today's `need`
+ * (`more`, bought as a top-up) and what it has beyond it (`less`). Units of
+ * one kind compare in its base unit. A vague purchase (no amount) covers any
+ * need; a vague need is covered by any purchase.
+ */
+export function diffParts(need: Part[], have: Part[]): { more: Part[]; less: Part[] } {
+  const n = canon(need);
+  const h = canon(have);
+  const more: Part[] = [];
+  const less: Part[] = [];
+  if (h.size > 0) {
+    for (const [key, b] of n) {
+      const d = roundDiff(b.kind, b.value - (h.get(key)?.value ?? 0));
+      if (d > 0) more.push({ amount: d, unit: b.unit });
+    }
+  }
+  if (n.size > 0) {
+    for (const [key, b] of h) {
+      const d = roundDiff(b.kind, b.value - (n.get(key)?.value ?? 0));
+      if (d > 0) less.push({ amount: d, unit: b.unit });
+    }
+  }
+  return { more, less };
+}
+
+/** Sums amounts already on the list (several items, or top-ups for one trip). */
+export function sumParts(parts: Part[]): Part[] {
+  return [...canon(parts).values()].map((b) => ({ amount: Math.round(b.value * 10) / 10, unit: b.unit }));
+}

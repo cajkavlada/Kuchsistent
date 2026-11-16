@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
   canServe,
+  diffParts,
+  portionsPhrase,
+  sumParts,
   formatPart,
   formatParts,
   newTripDates,
@@ -138,4 +141,42 @@ describe("tripFor", () => {
       "2026-11-16",
     );
   });
+});
+
+describe("diffParts", () => {
+  test("rise and drop in base units across units of one kind", () => {
+    expect(diffParts([{ amount: 1500, unit: "g" }], [{ amount: 1, unit: "kg" }])).toEqual({
+      more: [{ amount: 500, unit: "g" }],
+      less: [],
+    });
+    expect(diffParts([{ amount: 500, unit: "g" }], [{ amount: 1000, unit: "g" }])).toEqual({
+      more: [],
+      less: [{ amount: 500, unit: "g" }],
+    });
+  });
+  test("a new clashing kind is all more; a kind no longer needed is all less", () => {
+    expect(diffParts([{ amount: 500, unit: "g" }, { amount: 1, unit: "hrnek" }], [{ amount: 500, unit: "g" }])).toEqual({
+      more: [{ amount: 250, unit: "ml" }],
+      less: [],
+    });
+    expect(diffParts([{ amount: 2, unit: "ks" }], [{ amount: 2, unit: "ks" }, { amount: 100, unit: "g" }])).toEqual({
+      more: [],
+      less: [{ amount: 100, unit: "g" }],
+    });
+  });
+  test("vague purchases cover anything; vague needs are covered by anything", () => {
+    expect(diffParts([{ amount: 5, unit: "g" }], [])).toEqual({ more: [], less: [] });
+    expect(diffParts([], [{ amount: 5, unit: "g" }])).toEqual({ more: [], less: [] });
+  });
+});
+
+test("sumParts adds amounts of one kind", () => {
+  expect(sumParts([{ amount: 1, unit: "kg" }, { amount: 500, unit: "g" }, { amount: 2, unit: "ks" }])).toEqual([
+    { amount: 1500, unit: "g" },
+    { amount: 2, unit: "ks" },
+  ]);
+});
+
+test("portionsPhrase", () => {
+  expect([1, 3, 6, 1.5].map(portionsPhrase)).toEqual(["1 porci", "3 porce", "6 porcí", "1,5 porcí"]);
 });

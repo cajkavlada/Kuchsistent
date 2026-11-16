@@ -6,6 +6,7 @@ import { mayCreateHousehold } from "./lib/config";
 import { addSampleRecipes } from "./lib/sampleData";
 import { isTestMode } from "./lib/testMode";
 import { membershipOf, requireMember, requireUserId } from "./lib/membership";
+import { regenerateShopping } from "./shopping";
 import {
   MAX_FRESHNESS_DAYS,
   MIN_FRESHNESS_DAYS,
@@ -100,6 +101,7 @@ export const setDefaultPortions = mutation({
     const { household } = await requireMember(ctx);
     validatePortions(defaultPortions);
     await ctx.db.patch("households", household, { defaultPortions });
+    await regenerateShopping(ctx, household);
     return null;
   },
 });
@@ -136,6 +138,7 @@ export async function setFreshnessDaysFor(
   await ctx.db.patch("households", household, {
     freshnessDays: Object.keys(freshnessDays).length > 0 ? freshnessDays : undefined,
   });
+  await regenerateShopping(ctx, household);
   return null;
 }
 

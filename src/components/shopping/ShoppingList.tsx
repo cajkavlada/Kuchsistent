@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { dayLabel } from "~/lib/plan";
-import { groupBySection, itemAmount, progress } from "~/lib/shopping";
+import { groupBySection, itemAmount, noteTone, progress } from "~/lib/shopping";
 
 type List = FunctionReturnType<typeof api.shopping.list>;
 type Trip = List["trips"][number];
@@ -172,7 +172,10 @@ function TripView({
                   <span className="ck" aria-hidden="true">
                     {i.checked ? "✓" : ""}
                   </span>
-                  <span className="nm">{i.label}</span>
+                  <span className="nm">
+                    {i.label}
+                    {i.note && <span className={`snote ${noteTone(i.note)}`}>{i.note}</span>}
+                  </span>
                   <span className={`amt${i.amount === undefined ? " none" : ""}`}>{itemAmount(i)}</span>
                 </button>
               </li>

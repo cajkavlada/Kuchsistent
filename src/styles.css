@@ -463,6 +463,13 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .srow .nm { flex: 1; min-width: 0; font-weight: 500; }
 .srow .amt { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
 .srow .amt.none { color: var(--muted); font-weight: 400; }
+/* Regeneration notes (#28): inline-block so a ticked row's line-through skips them. */
+.srow .snote {
+  display: inline-block; margin: 2px 0 0 6px; padding: 1px 7px; border-radius: 999px;
+  font-size: .72rem; font-weight: 600; text-decoration: none; vertical-align: 1px;
+}
+.srow .snote.delta { background: #dcfce7; color: var(--green); }
+.srow .snote.gone { background: #fee2e2; color: var(--danger); }
 .srow.done .ck { background: var(--green); border-color: var(--green); }
 .srow.done .nm { text-decoration: line-through; color: var(--muted); }
 .srow.done .amt { color: var(--muted); }
