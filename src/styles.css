@@ -1,0 +1,55 @@
+:root {
+  --green: #2f6b3a;
+  --bg: #faf8f4;
+  --fg: #1f1f1c;
+  --muted: #6b675f;
+  --line: #e4dfd5;
+  --danger: #b3261e;
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { min-height: 100dvh; }
+h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
+.center {
+  min-height: 100dvh; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: .75rem; padding: 24px; text-align: center;
+  max-width: 420px; margin: 0 auto;
+}
+.logo { font-size: 1.8rem; font-weight: 700; margin: 0 0 .25rem; }
+.muted { color: var(--muted); margin: 0; }
+.small { font-size: .875rem; }
+.error { color: var(--danger); margin: 0; }
+.stack { display: flex; flex-direction: column; gap: .75rem; width: 100%; align-items: stretch; }
+.btn {
+  width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line);
+  background: #fff; font: inherit; font-weight: 600; display: inline-flex;
+  align-items: center; justify-content: center; gap: .6rem; cursor: pointer;
+}
+.btn.primary { background: var(--green); color: #fff; border-color: var(--green); }
+.btn:disabled { opacity: .6; }
+.link { background: none; border: 0; color: var(--muted); font: inherit; text-decoration: underline; margin-top: 1rem; }
+.field { display: flex; flex-direction: column; gap: .5rem; font-weight: 600; }
+.stepper { display: flex; align-items: center; justify-content: center; gap: 1.25rem; }
+.stepper button {
+  width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--line);
+  background: #fff; font-size: 1.4rem;
+}
+.stepper output { font-size: 1.8rem; min-width: 2ch; }
+.app { min-height: 100dvh; display: flex; flex-direction: column; }
+.content { flex: 1; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+.page { padding: 20px 16px; display: flex; flex-direction: column; gap: .75rem; max-width: 640px; margin: 0 auto; }
+.tabbar {
+  position: fixed; inset: auto 0 0 0; display: grid; grid-template-columns: repeat(4, 1fr);
+  background: #fff; border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; font-size: .75rem; color: var(--muted); text-decoration: none;
+}
+.tab.active { color: var(--green); font-weight: 700; }
+.tab span:first-child { font-size: 1.3rem; }
