@@ -36,6 +36,9 @@ Checks: `npm run typecheck`, `npm test`.
 | `AUTH_GOOGLE_CLIENT_SECRET` | from the OAuth client |
 | `SITE_URL` | the app's origin, e.g. `https://kuchsistent.vercel.app` (comma-separate several) |
 | `HOUSEHOLD_CREATOR_EMAILS` | comma-separated Google emails allowed to create a Household |
+| `ANTHROPIC_API_KEY` | Claude API key, for reading Recipe photos |
+| `GEMINI_API_KEY` | Gemini API key, the fallback reader |
+| `EXTRACTION_MODELS` | optional; models tried in order, default `claude-sonnet-5-5,gemini-3.8-flash` (`claude-*` or `gemini-*`) |
 
 **Vercel** (import the repo; `vercel.json` sets the framework and build command):
 - `CONVEX_DEPLOY_KEY` = a Convex *Production* deploy key, scoped to the Production environment.

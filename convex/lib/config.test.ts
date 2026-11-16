@@ -1,5 +1,23 @@
 import { describe, expect, test } from "vitest";
-import { allowedRedirectOrigins, mayCreateHousehold } from "./config";
+import {
+  DEFAULT_EXTRACTION_MODELS,
+  allowedRedirectOrigins,
+  extractionModels,
+  mayCreateHousehold,
+} from "./config";
+
+describe("extraction models", () => {
+  test("default: Claude Sonnet, then Gemini Flash", () => {
+    expect(extractionModels({})).toEqual(["claude-sonnet-5-5", "gemini-3.8-flash"]);
+    expect(extractionModels({ EXTRACTION_MODELS: " , " })).toEqual(DEFAULT_EXTRACTION_MODELS);
+  });
+
+  test("EXTRACTION_MODELS sets the order and skips unknown vendors", () => {
+    expect(
+      extractionModels({ EXTRACTION_MODELS: "claude-haiku-5-5, gpt-6-luna,gemini-3.8-flash,claude-haiku-5-5" }),
+    ).toEqual(["claude-haiku-5-5", "gemini-3.8-flash"]);
+  });
+});
 
 describe("config", () => {
   test("redirect origins: SITE_URL plus localhost, bare origins only", () => {
