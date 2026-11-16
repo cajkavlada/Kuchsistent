@@ -11,11 +11,11 @@ import { extractionModels, extractionVendor } from "./lib/config";
 import {
   ExtractionSchema,
   SYSTEM_PROMPT,
-  USER_PROMPT,
   draftFromExtraction,
   extractWithFallback,
   type ExtractionImage,
   type ModelCaller,
+  userPrompt,
 } from "./lib/extraction";
 import {
   MATCH_SYSTEM_PROMPT,
@@ -81,7 +81,7 @@ function claudeCaller(model: string): ModelCaller {
                   data: base64(img),
                 },
               })),
-              { type: "text" as const, text: USER_PROMPT },
+              { type: "text" as const, text: userPrompt(images.length) },
             ],
           },
         ],
@@ -116,7 +116,7 @@ function geminiCaller(model: string): ModelCaller {
                 mime_type: "image/jpeg",
                 resolution: "ultra_high",
               })),
-              { type: "text" as const, text: USER_PROMPT },
+              { type: "text" as const, text: userPrompt(images.length) },
             ],
           },
         ],

@@ -20,6 +20,7 @@ import {
   type Line,
   type NewIngredientFields,
 } from "./Ingredients";
+import { QueueCard, checkQueue } from "./CheckQueue";
 import { PhotoPane, Sheet, TopBar } from "./ui";
 
 export type RecipeView = NonNullable<FunctionReturnType<typeof api.recipes.get>>;
@@ -41,18 +42,39 @@ export const amountUnit = (l: { amount?: number; unit?: string }) =>
   [formatAmount(l.amount), l.unit].filter(Boolean).join(" ");
 
 /**
- * Review of a Draft Recipe (#9, variant C): the photo pinned on top, then
- * name, category, portions, Ingredient Lines and steps. Tapping any row opens
- * an edit sheet; every edit is saved to the draft straight away. New
- * Ingredients carry a "nová" badge and are created on save, no approval step.
+ * Review of a Draft Recipe (#9, variant C): the photo pinned on top, then the
+ * check queue one card at a time ("Ke kontrole ještě N", #20), then the
+ * summary: name, category, portions, Ingredient Lines and steps. Tapping any
+ * row opens an edit sheet; every edit is saved to the draft straight away.
+ * New Ingredients carry a "nová" badge and are created on save, no approval
+ * step. Saving needs an empty check queue.
  */
 export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () => void }) {
   const confirm = useMutation(api.recipes.confirm);
   const [sheet, setSheet] = useState<SheetState | null>(null);
+  const [skipped, setSkipped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const close = () => setSheet(null);
   const hasName = recipe.name.trim() !== "";
+  const queue = checkQueue(recipe);
+
+  if (queue.length > 0 && !skipped) {
+    return (
+      <section className="page">
+        <TopBar title={recipe.name || "Kontrola"} />
+        <PhotoPane photos={recipe.photos} />
+        <p className="qcount">
+          Ke kontrole ještě {queue.length}
+          <button className="link inline" onClick={() => setSkipped(true)}>
+            Přeskočit na shrnutí
+          </button>
+        </p>
+        <QueueCard recipe={recipe} item={queue[0]} />
+      </section>
+    );
+  }
+
   const newCount = new Set(
     recipe.lines.flatMap((l) => (l.proposed ? [ingredientKey(l.proposed.name)] : [])),
   ).size;
@@ -74,7 +96,16 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
     <section className="page with-bar">
       <TopBar title={recipe.name || "Shrnutí"} />
       <PhotoPane photos={recipe.photos} />
-      <p className="banner">Zkontroluj recept s fotkou. Ťukni na cokoli pro úpravu.</p>
+      {queue.length > 0 ? (
+        <div className="banner warn frow">
+          <span className="grow">Zbývá {queue.length} k ověření.</span>
+          <button className="chip" onClick={() => setSkipped(false)}>
+            Projít
+          </button>
+        </div>
+      ) : (
+        <p className="banner">✓ Vše zkontrolováno. Ťukni na cokoli pro úpravu.</p>
+      )}
 
       <div className="rcard">
         <button className="sumline" onClick={() => setSheet({ kind: "basics" })}>
@@ -85,7 +116,11 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
           <span>Druh · porce</span>
           <span>
             {CATEGORY_LABEL[recipe.category]} ·{" "}
-            {recipe.baseServings ? portionsLabel(recipe.baseServings) : "neuvedeno"}
+            {recipe.baseServings
+              ? portionsLabel(recipe.baseServings)
+              : recipe.servingsUnknown
+                ? "výchozí domácnosti"
+                : "neuvedeno"}
           </span>
         </button>
       </div>
@@ -114,6 +149,14 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
       </button>
 
       <h3 className="sec">Postup</h3>
+      {recipe.continuesOffPage && (
+        <div className="banner warn frow">
+          <span className="grow">📄 Recept asi pokračuje na další stránce.</span>
+          <button className="chip" onClick={() => setSkipped(false)}>
+            Vyřešit
+          </button>
+        </div>
+      )}
       <div className="rcard">
         {recipe.steps.map((s, i) => (
           <button key={i} className="sumline" onClick={() => setSheet({ kind: "steps" })}>
@@ -136,8 +179,18 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
         <button className="btn danger" onClick={() => setSheet({ kind: "discard" })} disabled={busy}>
           Zahodit
         </button>
-        <button className="btn primary grow" onClick={save} disabled={busy || !hasName}>
-          {busy ? "Ukládám…" : hasName ? "Uložit recept" : "Nejdřív doplň název"}
+        <button
+          className="btn primary grow"
+          onClick={save}
+          disabled={busy || !hasName || queue.length > 0}
+        >
+          {busy
+            ? "Ukládám…"
+            : queue.length > 0
+              ? `Nejdřív zkontroluj (${queue.length})`
+              : hasName
+                ? "Uložit recept"
+                : "Nejdřív doplň název"}
         </button>
       </div>
 

@@ -14,6 +14,7 @@ import type * as extractNode from "../extractNode.js";
 import type * as households from "../households.js";
 import type * as ingredients from "../ingredients.js";
 import type * as invites from "../invites.js";
+import type * as lib_checks from "../lib/checks.js";
 import type * as lib_config from "../lib/config.js";
 import type * as lib_dates from "../lib/dates.js";
 import type * as lib_extraction from "../lib/extraction.js";
@@ -43,6 +44,7 @@ import type * as users from "../users.js";
 "households": typeof households,
 "ingredients": typeof ingredients,
 "invites": typeof invites,
+"lib/checks": typeof lib_checks,
 "lib/config": typeof lib_config,
 "lib/dates": typeof lib_dates,
 "lib/extraction": typeof lib_extraction,

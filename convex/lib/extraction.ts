@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rawKey } from "./checks";
 import { cleanIngredientName, looksOptional } from "./ingredients";
 
 /**
@@ -61,6 +62,15 @@ Pravidla:
 
 export const USER_PROMPT = "Přepiš recept(y) z fotografie podle schématu.";
 
+/**
+ * Several photos are consecutive pages of one recipe (#20, "＋ Další
+ * stránka"); the model must join them rather than return a part per page.
+ */
+export function userPrompt(pages: number): string {
+  if (pages <= 1) return USER_PROMPT;
+  return `Fotografie (${pages}) jsou po sobě jdoucí stránky jednoho receptu, v tomto pořadí. Spoj je a vrať ho jako jeden recept podle schématu; continuesOffPage vyplň podle poslední stránky.`;
+}
+
 export type ExtractionImage = { data: Uint8Array; mediaType: string };
 
 /** One configured model: calls the vendor and returns the raw JSON output. */
@@ -109,12 +119,16 @@ export type DraftLine = {
   /** The Ingredient as read (base form), matched in the next stage. */
   name?: string;
   optional?: boolean;
+  /** Listed in the model's `uncertain`: "Nejisté čtení" in the check queue. */
+  uncertain?: boolean;
 };
 export type DraftFields = {
   name: string;
   baseServings?: number;
   steps: string[];
   lines: DraftLine[];
+  /** "Recept pokračuje" in the check queue. */
+  continuesOffPage: boolean;
 };
 
 export const MAX_SERVINGS = 50;
@@ -127,6 +141,7 @@ export function draftFromExtraction(result: Extraction): DraftFields {
   const recipe = result.recipes[0];
   const servings =
     recipe.servings === null ? undefined : Math.round(recipe.servings);
+  const uncertain = new Set(recipe.uncertain.map(rawKey));
   const lines: DraftLine[] = [];
   for (const group of recipe.ingredientGroups) {
     for (const line of group.lines) {
@@ -145,6 +160,7 @@ export function draftFromExtraction(result: Extraction): DraftFields {
         unit: unit || undefined,
         name: name || undefined,
         optional,
+        ...(uncertain.has(rawKey(raw)) ? { uncertain: true } : {}),
       });
     }
   }
@@ -156,5 +172,6 @@ export function draftFromExtraction(result: Extraction): DraftFields {
         : undefined,
     steps: recipe.steps.map((s) => s.trim()).filter(Boolean),
     lines,
+    continuesOffPage: recipe.continuesOffPage,
   };
 }

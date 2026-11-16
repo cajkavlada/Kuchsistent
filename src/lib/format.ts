@@ -45,9 +45,10 @@ const MESSAGES: Record<string, string> = {
   INVALID_DATE: "Neplatné datum.",
   INVALID_LINE: "Řádek suroviny je prázdný nebo má špatné množství.",
   INVALID_STEPS: "Postup je příliš dlouhý.",
-  INVALID_PHOTOS: "Fotku se nepodařilo uložit, zkus to znovu.",
+  INVALID_PHOTOS: "Fotky se nepodařilo uložit (nejvýš 10 stránek), zkus to znovu.",
   CANNOT_RETRY: "Recept se právě čte.",
   NOT_A_DRAFT: "Recept je už uložený.",
+  CHECKS_PENDING: "Nejdřív projdi, co je ke kontrole.",
 };
 
 /** Czech message for a failed Convex call. */

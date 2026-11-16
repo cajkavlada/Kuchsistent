@@ -8,7 +8,10 @@ import { createHouseholdFor } from "./households";
 import { memberOf, type Member } from "./lib/membership";
 import {
   addLineFor,
+  addPagesFor,
   confirmFor,
+  dismissCheckFor,
+  setServingsFor,
   lineViewsFor,
   mapToIngredientFor,
   createDraftFor,
@@ -59,9 +62,10 @@ const DRAFT = {
     { raw: "10 dkg cibule", amount: 10, unit: "dkg" },
     { raw: "sůl" },
   ],
+  continuesOffPage: false,
 };
 
-type ReadLine = (typeof DRAFT.lines)[number] & { name?: string; optional?: boolean };
+type ReadLine = (typeof DRAFT.lines)[number] & { name?: string; optional?: boolean; uncertain?: boolean };
 type MatchResult = {
   items: {
     n: number;
@@ -85,7 +89,14 @@ async function readDraft(
     lines = DRAFT.lines as ReadLine[],
     items,
     result = null,
-  }: { model?: string; lines?: ReadLine[]; items?: ReadLine[]; result?: MatchResult } = {},
+    draft = {},
+  }: {
+    model?: string;
+    lines?: ReadLine[];
+    items?: ReadLine[];
+    result?: MatchResult;
+    draft?: Partial<Omit<typeof DRAFT, "lines">>;
+  } = {},
 ) {
   const photo = await storePhoto(t);
   const recipeId = await t.run((ctx) => createDraftFor(ctx, member, [photo]));
@@ -94,7 +105,7 @@ async function readDraft(
     recipeId,
     startedAt: run,
     model,
-    draft: { ...DRAFT, lines },
+    draft: { ...DRAFT, ...draft, lines },
   });
   const toMatch = (l: ReadLine) => ({ name: l.name ?? "", unit: l.unit, raw: l.raw });
   await t.mutation(internal.recipes.applyMatching, {
@@ -105,6 +116,19 @@ async function readDraft(
     result,
   });
   return { recipeId, photo };
+}
+
+/** Gives every line an Ingredient named after its text, so no "Řádek bez suroviny" blocks saving. */
+async function mapAllLines(t: T, member: Member, recipeId: Id<"recipes">) {
+  for (const l of await t.run((ctx) => lineViewsFor(ctx, member, recipeId))) {
+    if (l.ingredient || l.proposed) continue;
+    await t.run((ctx) =>
+      updateLineFor(ctx, member, {
+        lineId: l._id,
+        line: { raw: l.raw, amount: l.amount, unit: l.unit, ingredientName: l.raw },
+      }),
+    );
+  }
 }
 
 const linesOf = (t: T, recipeId: Id<"recipes">) =>
@@ -305,6 +329,7 @@ describe("review and save", () => {
     await t.run((ctx) => updateBasicsFor(ctx, member, { recipeId, name: " ", category: "main" }));
     await expect(t.run((ctx) => confirmFor(ctx, member, { recipeId }))).rejects.toThrow(/NAME_REQUIRED/);
     await t.run((ctx) => updateBasicsFor(ctx, member, { recipeId, name: "Kuře", category: "main", baseServings: 4 }));
+    await mapAllLines(t, member, recipeId);
     await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
     await t.run(async (ctx) => {
       expect((await ctx.db.get("recipes", recipeId))!.status).toBe("confirmed");
@@ -452,6 +477,10 @@ describe("matching Ingredients and new Ingredients", () => {
     expect((await view(t, member, recipeId))[2].proposed).toEqual({
       name: "sádlo", freshnessClass: "chilled", storeSection: "deli", measureKind: "weight",
     });
+    // "voda" has no Ingredient: "Řádek bez suroviny" blocks saving until deleted.
+    await expect(t.run((ctx) => confirmFor(ctx, member, { recipeId }))).rejects.toThrow(/CHECKS_PENDING/);
+    const voda = (await view(t, member, recipeId))[4];
+    await t.run((ctx) => deleteLineFor(ctx, member, { lineId: voda._id }));
     // No approval needed: saving creates them as they stand.
     await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
     const all = await ingredientsOf(t, member);
@@ -462,7 +491,7 @@ describe("matching Ingredients and new Ingredients", () => {
     ]);
     const saved = await linesOf(t, recipeId);
     expect(saved.map((l) => all.find((i) => i._id === l.ingredient)?.name ?? null)).toEqual([
-      "cibule", "sádlo", "sádlo", "petrželka", null,
+      "cibule", "sádlo", "sádlo", "petrželka",
     ]);
     expect(saved.every((l) => l.proposed === undefined)).toBe(true);
   });
@@ -530,5 +559,123 @@ describe("matching Ingredients and new Ingredients", () => {
     await t.run((ctx) => addLineFor(ctx, member, { recipeId, line: { raw: "špetka soli", ingredientName: "sůl" } }));
     expect((await view(t, member, recipeId))[3].proposed).toMatchObject({ name: "sůl", storeSection: "spices" });
     await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
+  });
+});
+
+describe("check queue and more pages (#20)", () => {
+  const MAPPED: ReadLine[] = [
+    { raw: "10 dkg cibule", amount: 10, unit: "dkg", name: "cibule" },
+    { raw: "2,5 dl smetany", amount: 2.5, unit: "dl", name: "smetana", uncertain: true },
+  ];
+
+  const recipeOf = (t: T, recipeId: Id<"recipes">) => t.run((ctx) => ctx.db.get("recipes", recipeId));
+  const view = (t: T, member: Member, recipeId: Id<"recipes">) =>
+    t.run((ctx) => lineViewsFor(ctx, member, recipeId));
+
+  test("reading keeps uncertain lines and 'continues off page'; the view shows them", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId } = await readDraft(t, member, { lines: MAPPED, draft: { continuesOffPage: true } });
+    expect((await recipeOf(t, recipeId))!.continuesOffPage).toBe(true);
+    const lines = await view(t, member, recipeId);
+    expect(lines.map((l) => l.uncertain)).toEqual([false, true]);
+  });
+
+  test("each open check blocks saving until it is answered", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId } = await readDraft(t, member, {
+      lines: [...MAPPED, { raw: "voda" }],
+      draft: { continuesOffPage: true, baseServings: undefined },
+    });
+    const save = () => t.run((ctx) => confirmFor(ctx, member, { recipeId }));
+    await expect(save()).rejects.toThrow(/CHECKS_PENDING/);
+    // "Ne, je to celé"
+    await t.run((ctx) => dismissCheckFor(ctx, member, { recipeId, check: "continues" }));
+    // "Nevím – nechat výchozí": servings stay unset (Household default, never scaled).
+    await t.run((ctx) => dismissCheckFor(ctx, member, { recipeId, check: "servings" }));
+    // "✓ Takhle je to správně" with a corrected amount.
+    const [, smetana, voda] = await view(t, member, recipeId);
+    await t.run((ctx) =>
+      updateLineFor(ctx, member, {
+        lineId: smetana._id,
+        line: { raw: smetana.raw, amount: 2, unit: "dl", ingredientName: "smetana" },
+      }),
+    );
+    await expect(save()).rejects.toThrow(/CHECKS_PENDING/);
+    // "Řádek bez suroviny": fill in.
+    await t.run((ctx) =>
+      updateLineFor(ctx, member, { lineId: voda._id, line: { raw: "voda", ingredientName: "voda" } }),
+    );
+    await save();
+    const recipe = await recipeOf(t, recipeId);
+    expect(recipe!.status).toBe("confirmed");
+    expect(recipe!.baseServings).toBeUndefined();
+    expect(recipe!.servingsUnknown).toBeUndefined();
+    expect(recipe!.continuesOffPage).toBeUndefined();
+    const saved = await linesOf(t, recipeId);
+    expect(saved.map((l) => [l.amount, l.uncertain])).toEqual([[10, undefined], [2, undefined], [undefined, undefined]]);
+  });
+
+  test("a servings chip sets the servings; invalid numbers are rejected", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId } = await readDraft(t, member, { lines: [MAPPED[0]], draft: { baseServings: undefined } });
+    await expect(
+      t.run((ctx) => setServingsFor(ctx, member, { recipeId, baseServings: 0 })),
+    ).rejects.toThrow(/INVALID_PORTIONS/);
+    await t.run((ctx) => setServingsFor(ctx, member, { recipeId, baseServings: 6 }));
+    expect((await recipeOf(t, recipeId))!.baseServings).toBe(6);
+    await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
+  });
+
+  test("'Vyfotit další stránku' appends pages and reads the whole recipe again", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId, photo } = await readDraft(t, member, {
+      lines: MAPPED,
+      draft: { continuesOffPage: true, baseServings: undefined },
+    });
+    await t.run((ctx) => dismissCheckFor(ctx, member, { recipeId, check: "servings" }));
+    const before = await startedAt(t, recipeId);
+    vi.setSystemTime(Date.now() + 1000);
+    const page2 = await storePhoto(t);
+    await t.run((ctx) => addPagesFor(ctx, member, { recipeId, storageIds: [page2] }));
+    const recipe = await recipeOf(t, recipeId);
+    expect(recipe!.extraction).toMatchObject({ state: "pending", stage: "read" });
+    expect(recipe!.extraction!.startedAt).toBeGreaterThan(before);
+    expect(recipe!.continuesOffPage).toBeUndefined();
+    const run = recipe!.extraction!.startedAt;
+    expect(await t.query(internal.recipes.extractionInput, { recipeId, startedAt: run })).toEqual([photo, page2]);
+    // While reading again nothing can be edited or added.
+    await expect(
+      t.run(async (ctx) => addPagesFor(ctx, member, { recipeId, storageIds: [await ctx.storage.store(new Blob(["x"]))] })),
+    ).rejects.toThrow(/EXTRACTION_PENDING/);
+    // The new reading replaces the draft and asks about servings again.
+    await t.mutation(internal.recipes.applyExtraction, {
+      recipeId, startedAt: run, model: "m", draft: { ...DRAFT, baseServings: undefined, lines: [MAPPED[0]] },
+    });
+    const reread = await recipeOf(t, recipeId);
+    expect(reread!.servingsUnknown).toBeUndefined();
+    expect(reread!.continuesOffPage).toBeUndefined();
+    expect((await linesOf(t, recipeId)).map((l) => l.raw)).toEqual(["10 dkg cibule"]);
+  });
+
+  test("pages can't be reused, duplicated, or exceed the limit, nor added to a saved Recipe", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId, photo } = await readDraft(t, member, { lines: [MAPPED[0]] });
+    const add = (storageIds: Id<"_storage">[]) =>
+      t.run((ctx) => addPagesFor(ctx, member, { recipeId, storageIds }));
+    await expect(add([])).rejects.toThrow(/INVALID_PHOTOS/);
+    await expect(add([photo])).rejects.toThrow(/INVALID_PHOTOS/);
+    const p = await storePhoto(t);
+    await expect(add([p, p])).rejects.toThrow(/INVALID_PHOTOS/);
+    const many = await Promise.all(Array.from({ length: 10 }, () => storePhoto(t)));
+    await expect(add(many)).rejects.toThrow(/INVALID_PHOTOS/);
+    await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
+    await expect(add([p])).rejects.toThrow(/NOT_A_DRAFT/);
+    const b = await newMember(t, "b@example.com");
+    await expect(t.run((ctx) => addPagesFor(ctx, b, { recipeId, storageIds: [p] }))).rejects.toThrow(/NOT_FOUND/);
   });
 });

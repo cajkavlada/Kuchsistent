@@ -32,6 +32,7 @@ export const MEASURE_SHORT = { weight: "g", volume: "ml", count: "ks" } as const
 export function LineBadges({ line }: { line: Line }) {
   return (
     <>
+      {line.uncertain && <span className="badge b-warn">nejisté</span>}
       {line.proposed && (
         <span className="badge b-new">nová · {MEASURE_SHORT[line.proposed.measureKind]}</span>
       )}
