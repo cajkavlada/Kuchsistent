@@ -12,7 +12,10 @@
  * Updates: Vercel serves this file and /sw-precache.json with no-cache.
  * Navigations go network-first, so a new deploy's HTML (and its new bundles)
  * is used on the next launch with signal; the cache then re-syncs to the new
- * bundle list and drops the old bundles.
+ * bundle list. Bundles of the previous deploy are kept for one more deploy:
+ * a page already running the old HTML (served from cache on a slow network,
+ * or left open) still lazily loads its old route chunks, and Vercel no longer
+ * has them. Dropping them at once left the app stuck on "Načítám…".
  *
  * Bump CACHE when this file's caching scheme changes.
  */
@@ -20,6 +23,8 @@ const CACHE = "kuchsistent-shell-v1";
 const SHELL_KEY = "/__shell";
 const SHELL_SOURCE = "/plan";
 const PRECACHE_LIST = "/sw-precache.json";
+// The bundle list of the last sync, so the sync after it can keep those too.
+const LIST_KEY = "/__precache";
 const STATIC = ["/site.webmanifest", "/icon-192.png", "/icon-512.png", "/icon.svg"];
 // With poor signal a navigation can hang; after this, show the cached shell.
 const NAV_TIMEOUT_MS = 3000;
@@ -128,7 +133,16 @@ async function sync({ requireShell }) {
   );
 
   if (assets) {
-    const keep = new Set(assets);
+    const previous = await cache.match(LIST_KEY);
+    await cache.put(
+      LIST_KEY,
+      new Response(JSON.stringify({ assets }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    // No record of the previous list (first sync): prune nothing this time.
+    if (!previous) return;
+    const keep = new Set([...assets, ...(await previous.json()).assets]);
     await Promise.all(
       [...cachedPaths]
         .filter((path) => path.startsWith("/assets/") && !keep.has(path))

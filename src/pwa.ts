@@ -14,6 +14,9 @@ interface BeforeInstallPromptEvent extends Event {
 
 const DISMISSED_KEY = "kuchsistent:installDismissed";
 const MEMBER_KEY = "kuchsistent:member";
+const CHUNK_RELOAD_KEY = "kuchsistent:chunkReloadAt";
+/** Don't reload again within this window, so a broken deploy can't loop. */
+const CHUNK_RELOAD_WINDOW_MS = 30_000;
 
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
 const listeners = new Set<() => void>();
@@ -36,6 +39,16 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", notify);
   window.addEventListener("offline", notify);
 
+  // A page running an older deploy's HTML can ask for a route chunk that no
+  // longer exists, and the app then never leaves "Načítám…". Reloading picks
+  // up the current deploy (the service worker has the new shell by then).
+  window.addEventListener("vite:preloadError", (e) => {
+    if (reloadForStaleChunk()) e.preventDefault();
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    if (isChunkLoadError(e.reason)) reloadForStaleChunk();
+  });
+
   if ("serviceWorker" in navigator && import.meta.env.PROD) {
     window.addEventListener("load", () => {
       // updateViaCache "none": always revalidate sw.js, so deploys roll out.
@@ -44,6 +57,37 @@ if (typeof window !== "undefined") {
         .catch((err) => console.error("Service worker registration failed", err));
     });
   }
+}
+
+export function isChunkLoadError(reason: unknown): boolean {
+  const message = reason instanceof Error ? reason.message : String(reason ?? "");
+  return /dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(
+    message,
+  );
+}
+
+export function shouldReloadForChunk(lastReloadAt: number | null, now: number): boolean {
+  return lastReloadAt === null || now - lastReloadAt > CHUNK_RELOAD_WINDOW_MS;
+}
+
+/** Reloads the page once per window; true if it did. */
+function reloadForStaleChunk(): boolean {
+  let last: number | null = null;
+  try {
+    const raw = sessionStorage.getItem(CHUNK_RELOAD_KEY);
+    last = raw === null ? null : Number(raw);
+  } catch {
+    // Storage unavailable: still reload, the window guard just won't persist.
+  }
+  const now = Date.now();
+  if (!shouldReloadForChunk(last, now)) return false;
+  try {
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(now));
+  } catch {
+    // ignore
+  }
+  window.location.reload();
+  return true;
 }
 
 function isStandalone(): boolean {
