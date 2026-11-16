@@ -65,14 +65,11 @@ _Avoid_: Servings (except when quoting the book)
 ### Shopping
 
 **Shopping Trip**:
-A dated purchase run that a set of Shopping Items is assigned to; either an in-store trip or a Rohlík delivery.
+A dated purchase run that a set of Shopping Items is assigned to; created by default at a regular interval and freely moved, removed or added; either an in-store trip or a Rohlík delivery.
 _Avoid_: Shop, errand
 
-**Usual Shopping Days**:
-The weekdays the Household normally shops on; Shopping Trips are proposed on these days first.
-
 **Freshness Class**:
-How long an Ingredient stays good after purchase (e.g. fresh meat, vegetables, long-life); limits how early it may be bought before its Planned Meal.
+How long an Ingredient stays good after purchase (e.g. fresh meat, vegetables, long-life); buying earlier than that before its Planned Meal is flagged as not fresh.
 _Avoid_: Shelf life, expiry
 
 **Shopping Item**:
