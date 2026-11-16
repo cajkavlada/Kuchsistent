@@ -5,6 +5,7 @@ import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
 import { invitePath } from "@convex/lib/inviteCode";
 import { APP_TIME_ZONE } from "@convex/lib/dates";
+import { rememberMember } from "~/pwa";
 
 export const Route = createFileRoute("/nastaveni")({ component: Settings });
 
@@ -16,7 +17,15 @@ function Settings() {
       <Members />
       <InviteCard />
       <DefaultPortions />
-      <button className="btn" onClick={() => void signOut()}>Odhlásit se</button>
+      <button
+        className="btn"
+        onClick={() => {
+          rememberMember(false);
+          void signOut();
+        }}
+      >
+        Odhlásit se
+      </button>
     </section>
   );
 }
