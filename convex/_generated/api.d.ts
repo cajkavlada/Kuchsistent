@@ -12,11 +12,14 @@
   import type * as auth from "../auth.js";
 import type * as extractNode from "../extractNode.js";
 import type * as households from "../households.js";
+import type * as ingredients from "../ingredients.js";
 import type * as invites from "../invites.js";
 import type * as lib_config from "../lib/config.js";
 import type * as lib_dates from "../lib/dates.js";
 import type * as lib_extraction from "../lib/extraction.js";
+import type * as lib_ingredients from "../lib/ingredients.js";
 import type * as lib_inviteCode from "../lib/inviteCode.js";
+import type * as lib_matching from "../lib/matching.js";
 import type * as lib_membership from "../lib/membership.js";
 import type * as lib_testMode from "../lib/testMode.js";
 import type * as recipes from "../recipes.js";
@@ -36,11 +39,14 @@ import type * as users from "../users.js";
     "auth": typeof auth,
 "extractNode": typeof extractNode,
 "households": typeof households,
+"ingredients": typeof ingredients,
 "invites": typeof invites,
 "lib/config": typeof lib_config,
 "lib/dates": typeof lib_dates,
 "lib/extraction": typeof lib_extraction,
+"lib/ingredients": typeof lib_ingredients,
 "lib/inviteCode": typeof lib_inviteCode,
+"lib/matching": typeof lib_matching,
 "lib/membership": typeof lib_membership,
 "lib/testMode": typeof lib_testMode,
 "recipes": typeof recipes,

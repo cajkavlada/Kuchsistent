@@ -46,6 +46,7 @@ export function Sheet({
 export const STAGES = [
   { id: "upload", label: "Nahrávám fotky" },
   { id: "read", label: "Čtu recept" },
+  { id: "match", label: "Páruji suroviny" },
 ] as const;
 export type Stage = (typeof STAGES)[number]["id"];
 

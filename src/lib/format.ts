@@ -46,6 +46,9 @@ const MESSAGES: Record<string, string> = {
   INVALID_PHOTOS: "Fotku se nepodařilo uložit, zkus to znovu.",
   CANNOT_RETRY: "Recept se právě čte.",
   NOT_A_DRAFT: "Recept je už uložený.",
+  QUEUE_NOT_EMPTY: "Nejdřív zkontroluj nové suroviny.",
+  NOT_NEW: "Tahle surovina už je zkontrolovaná.",
+  INVALID_INGREDIENT: "Doplň název suroviny.",
 };
 
 /** Czech message for a failed Convex call. */

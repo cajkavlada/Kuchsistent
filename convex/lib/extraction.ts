@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cleanIngredientName, looksOptional } from "./ingredients";
 
 /**
  * Reading a Recipe from cookbook photos (#2). The model returns
@@ -15,6 +16,10 @@ export const IngredientLineSchema = z.object({
   unit: z.string().describe('Jednotka tak, jak je v knize (dkg, g, l, lžíce…); "" když není'),
   ingredient: z.string().describe("Surovina v základním tvaru, např. hladká mouka"),
   note: z.string().describe('Poznámka, např. "na podsypání", "dle chuti"; jinak ""'),
+  optional: z
+    .boolean()
+    .optional()
+    .describe("Recept surovinu uvádí jako volitelnou (případně, na ozdobu)"),
 });
 
 export const ExtractedRecipeSchema = z.object({
@@ -51,7 +56,8 @@ Pravidla:
 5. Postup rozděl na kroky tam, kde kniha dělí odstavce nebo číslované kroky. Nic si nevymýšlej.
 6. Starší písmo a vybledlý tisk: když si znakem nejsi jistý, napiš nejlepší čtení a celý řádek (raw) dej do uncertain. Nikdy nehádej potichu.
 7. Pokud je fotka otočená, čti ji ve správné orientaci.
-8. servings vyplň jen tehdy, když kniha počet porcí uvádí; jinak null.`;
+8. servings vyplň jen tehdy, když kniha počet porcí uvádí; jinak null.
+9. optional dej true u surovin, které recept uvádí jako volitelné („případně“, „na ozdobu“, „podle chuti lze přidat“).`;
 
 export const USER_PROMPT = "Přepiš recept(y) z fotografie podle schématu.";
 
@@ -96,7 +102,14 @@ export async function extractWithFallback(
   return { ok: false, error: errors.join(" | ") };
 }
 
-export type DraftLine = { raw: string; amount?: number; unit?: string };
+export type DraftLine = {
+  raw: string;
+  amount?: number;
+  unit?: string;
+  /** The Ingredient as read (base form), matched in the next stage. */
+  name?: string;
+  optional?: boolean;
+};
 export type DraftFields = {
   name: string;
   baseServings?: number;
@@ -120,6 +133,9 @@ export function draftFromExtraction(result: Extraction): DraftFields {
       const raw = line.raw.trim();
       if (!raw) continue;
       const unit = line.unit.trim();
+      const name = cleanIngredientName(line.ingredient);
+      const optional =
+        line.optional === true || looksOptional(`${group.title} ${raw} ${line.note}`);
       lines.push({
         raw,
         amount:
@@ -127,6 +143,8 @@ export function draftFromExtraction(result: Extraction): DraftFields {
             ? line.quantity
             : undefined,
         unit: unit || undefined,
+        name: name || undefined,
+        optional,
       });
     }
   }

@@ -3,6 +3,7 @@ import { useMutation } from "convex/react";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import { CATEGORY_LABEL, errorMessage, portionsLabel } from "~/lib/format";
+import { lineIngredientName } from "./CheckQueue";
 import { amountUnit, type RecipeView } from "./Review";
 import { PhotoPane, ScanView, TopBar } from "./ui";
 
@@ -11,7 +12,10 @@ export function Reading({ recipe }: { recipe: RecipeView }) {
   return (
     <section className="page">
       <TopBar title="Čtu recept" />
-      <ScanView photoUrl={recipe.photos[0]?.url ?? null} stage="read" />
+      <ScanView
+        photoUrl={recipe.photos[0]?.url ?? null}
+        stage={recipe.extraction?.stage === "match" ? "match" : "read"}
+      />
       <p className="muted small center-text">
         Obvykle 5–20 s. Když aplikaci zavřeš, čtení doběhne a koncept najdeš
         v knihovně v Rozpracovaných.
@@ -119,7 +123,10 @@ export function RecipeDetail({ recipe }: { recipe: RecipeView }) {
         {recipe.lines.map((l) => (
           <div key={l._id} className="sumline">
             <span>{amountUnit(l)}</span>
-            <span className="printed">{l.raw}</span>
+            <span>
+              {lineIngredientName(l) || <span className="printed">{l.raw}</span>}
+              {l.optional && <small className="muted"> (volitelné)</small>}
+            </span>
           </div>
         ))}
       </div>

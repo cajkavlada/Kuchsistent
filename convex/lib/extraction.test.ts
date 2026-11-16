@@ -103,9 +103,10 @@ describe("draftFromExtraction", () => {
       baseServings: 4,
       steps: ["Osmahneme cibuli.", "Podlijeme vodou."],
       lines: [
-        { raw: "25 dkg hladké mouky", amount: 25, unit: "dkg" },
-        { raw: "½ l smetany", amount: 0.5, unit: "l" },
-        { raw: "sůl", amount: undefined, unit: undefined },
+        { raw: "25 dkg hladké mouky", amount: 25, unit: "dkg", name: "hladká mouka", optional: false },
+        { raw: "½ l smetany", amount: 0.5, unit: "l", name: "smetana", optional: false },
+        // In the "Na ozdobu" group, so optional.
+        { raw: "sůl", amount: undefined, unit: undefined, name: "sůl", optional: true },
       ],
     });
   });
@@ -133,6 +134,32 @@ describe("draftFromExtraction", () => {
     });
     const draft = draftFromExtraction({ recipes: [first, recipe({ name: "Polévka" })] });
     expect(draft.name).toBe("Kuře na paprice");
-    expect(draft.lines).toEqual([{ raw: "2 vejce", amount: undefined, unit: undefined }]);
+    expect(draft.lines).toEqual([
+      { raw: "2 vejce", amount: undefined, unit: undefined, name: "vejce", optional: false },
+    ]);
+  });
+
+  test("marks lines optional when the model says so or the text does", () => {
+    const line = (raw: string, note = "", optional?: boolean) => ({
+      raw, quantity: null, unit: "", ingredient: "x", note, optional,
+    });
+    const draft = draftFromExtraction({
+      recipes: [
+        recipe({
+          ingredientGroups: [
+            {
+              title: "",
+              lines: [
+                line("petrželka", "", true),
+                line("případně trochu smetany"),
+                line("kopr", "na ozdobu"),
+                line("2 vejce"),
+              ],
+            },
+          ],
+        }),
+      ],
+    });
+    expect(draft.lines.map((l) => l.optional)).toEqual([true, true, true, false]);
   });
 });
