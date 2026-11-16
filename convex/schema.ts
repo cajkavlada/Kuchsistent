@@ -1,5 +1,11 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import {
+  vFreshnessClass,
+  vMeasureKind,
+  vProposal,
+  vStoreSection,
+} from "./lib/ingredients";
 
 export default defineSchema({
   /** A person, as their Google account. Auth sessions live in the auth component. */
@@ -70,6 +76,8 @@ export default defineSchema({
         error: v.optional(v.string()),
         /** When this reading run was scheduled; identifies the run. */
         startedAt: v.number(),
+        /** While pending: reading the photos, then matching Ingredients (#19). */
+        stage: v.optional(v.union(v.literal("read"), v.literal("match"))),
       }),
     ),
   }).index("by_household_status", ["household", "status"]),
@@ -85,7 +93,9 @@ export default defineSchema({
 
   /**
    * An Ingredient Line as printed (`raw`), plus the parsed amount and unit
-   * (kept as written, e.g. `dkg`). Mapping to an Ingredient comes later (#19).
+   * (kept as written, e.g. `dkg`), mapped to a Household Ingredient (#19).
+   * On a Draft Recipe a line may instead carry `proposed`: a new Ingredient
+   * the AI guessed, created on save once the user approved it.
    */
   ingredientLines: defineTable({
     recipe: v.id("recipes"),
@@ -93,5 +103,22 @@ export default defineSchema({
     raw: v.string(),
     amount: v.optional(v.number()),
     unit: v.optional(v.string()),
-  }).index("by_recipe", ["recipe", "order"]),
+    ingredient: v.optional(v.id("ingredients")),
+    /** Optional Line ("případně", "na ozdobu"); unset on lines saved before #19. */
+    optional: v.optional(v.boolean()),
+    proposed: v.optional(v.object({ ...vProposal.fields, approved: v.boolean() })),
+  })
+    .index("by_recipe", ["recipe", "order"])
+    .index("by_ingredient", ["ingredient"]),
+
+  /** A Household Ingredient (#6): the canonical thing you buy. */
+  ingredients: defineTable({
+    household: v.id("households"),
+    name: v.string(),
+    freshnessClass: vFreshnessClass,
+    storeSection: vStoreSection,
+    measureKind: vMeasureKind,
+    plenty: v.boolean(),
+    neverBuy: v.boolean(),
+  }).index("by_household", ["household"]),
 });

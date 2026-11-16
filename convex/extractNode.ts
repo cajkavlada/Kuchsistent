@@ -17,6 +17,14 @@ import {
   type ExtractionImage,
   type ModelCaller,
 } from "./lib/extraction";
+import {
+  MATCH_SYSTEM_PROMPT,
+  MatchSchema,
+  matchUserPrompt,
+  matchWithFallback,
+  unmatchedItems,
+  type MatchCaller,
+} from "./lib/matching";
 
 /**
  * Reads a Draft Recipe's photos with the configured models (#2) and writes
@@ -26,10 +34,12 @@ import {
 
 const TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_TOKENS = 8192;
+/** Same cap as `recipes.applyExtraction`. */
+const MAX_LINES = 200;
 
 /** JSON Schema for Gemini, without the `$schema` meta key. */
-function geminiSchema(): Record<string, unknown> {
-  const schema: Record<string, unknown> = { ...z.toJSONSchema(ExtractionSchema) };
+function geminiSchema(zodSchema: z.ZodType = ExtractionSchema): Record<string, unknown> {
+  const schema: Record<string, unknown> = { ...z.toJSONSchema(zodSchema) };
   delete schema.$schema;
   return schema;
 }
@@ -127,6 +137,63 @@ function geminiCaller(model: string): ModelCaller {
   };
 }
 
+/** Matching Ingredients (#19): text only, same models and settings as reading. */
+function claudeMatcher(model: string): MatchCaller {
+  return {
+    model,
+    call: async (system, prompt) => {
+      const client = new Anthropic({
+        apiKey: requireKey("ANTHROPIC_API_KEY"),
+        timeout: TIMEOUT_MS,
+        maxRetries: 1,
+      });
+      const message = await client.messages.parse({
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        thinking: model.includes("haiku") ? { type: "disabled" } : { type: "between_tools" },
+        output_config: { effort: "low", format: zodOutputFormat(MatchSchema) },
+        system,
+        messages: [{ role: "user", content: prompt }],
+      });
+      if (message.stop_reason !== "end_turn") {
+        throw new Error(`stop_reason ${message.stop_reason}`);
+      }
+      if (!message.parsed_output) throw new Error("no parsed output");
+      return message.parsed_output;
+    },
+  };
+}
+
+function geminiMatcher(model: string): MatchCaller {
+  return {
+    model,
+    call: async (system, prompt) => {
+      const ai = new GoogleGenAI({ apiKey: requireKey("GEMINI_API_KEY") });
+      const interaction = await ai.interactions.create({
+        model,
+        store: false,
+        system_instruction: system,
+        input: [{ type: "user_input" as const, content: [{ type: "text" as const, text: prompt }] }],
+        response_format: {
+          type: "text",
+          mime_type: "application/json",
+          schema: geminiSchema(MatchSchema),
+        },
+        generation_config: { thinking_level: "low", max_output_tokens: MAX_OUTPUT_TOKENS },
+      });
+      const text = "output_text" in interaction ? interaction.output_text : undefined;
+      if (!text) throw new Error("empty output");
+      return text;
+    },
+  };
+}
+
+function matchersFor(models: string[]): MatchCaller[] {
+  return models.map((model) =>
+    extractionVendor(model) === "anthropic" ? claudeMatcher(model) : geminiMatcher(model),
+  );
+}
+
 function callersFor(models: string[]): ModelCaller[] {
   return models.map((model) =>
     extractionVendor(model) === "anthropic" ? claudeCaller(model) : geminiCaller(model),
@@ -159,11 +226,36 @@ export const run = internalAction({
         await fail(outcome.error);
         return null;
       }
-      await ctx.runMutation(internal.recipes.applyExtraction, {
+      const draft = draftFromExtraction(outcome.result);
+      const applied = await ctx.runMutation(internal.recipes.applyExtraction, {
         recipeId,
         startedAt,
         model: outcome.model,
-        draft: draftFromExtraction(outcome.result),
+        draft,
+      });
+      if (applied === null) return null;
+      // Stage "Páruji suroviny": only names with no exact match go to the model.
+      const lines = draft.lines.slice(0, MAX_LINES).map((l) => ({
+        name: l.name ?? "",
+        unit: l.unit,
+        raw: l.raw,
+      }));
+      const items = unmatchedItems(lines, applied.catalogue);
+      // Try the model that read the recipe first; a failure falls back to default guesses.
+      const models = [outcome.model, ...extractionModels().filter((m) => m !== outcome.model)];
+      const matched = items.length
+        ? await matchWithFallback(
+            matchersFor(models),
+            MATCH_SYSTEM_PROMPT,
+            matchUserPrompt(items, applied.catalogue),
+          )
+        : null;
+      await ctx.runMutation(internal.recipes.applyMatching, {
+        recipeId,
+        startedAt,
+        lines,
+        items,
+        result: matched?.result ?? null,
       });
     } catch (err) {
       await fail(err instanceof Error ? err.message : String(err));

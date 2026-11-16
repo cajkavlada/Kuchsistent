@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
@@ -11,10 +11,18 @@ import {
   parseAmount,
   portionsLabel,
 } from "~/lib/format";
+import { ingredientKey } from "@convex/lib/ingredients";
+import {
+  IngredientPicker,
+  LineBadges,
+  NewIngredientCard,
+  checkQueue,
+  lineIngredientName,
+  type Line,
+} from "./CheckQueue";
 import { PhotoPane, Sheet, TopBar } from "./ui";
 
 export type RecipeView = NonNullable<FunctionReturnType<typeof api.recipes.get>>;
-type Line = RecipeView["lines"][number];
 
 type SheetState =
   | { kind: "basics" }
@@ -26,17 +34,38 @@ export const amountUnit = (l: { amount?: number; unit?: string }) =>
   [formatAmount(l.amount), l.unit].filter(Boolean).join(" ");
 
 /**
- * Review of a Draft Recipe (#9, variant C summary): the photo pinned on top,
- * then name, category, portions, Ingredient Lines and steps. Tapping any row
- * opens an edit sheet; every edit is saved to the draft straight away.
+ * Review of a Draft Recipe (#9, variant C): the photo pinned on top, then the
+ * check queue one card at a time ("Ke kontrole ještě N"), then the summary:
+ * name, category, portions, Ingredient Lines and steps. Tapping any summary
+ * row opens an edit sheet; every edit is saved to the draft straight away.
+ * Saving needs an empty check queue.
  */
 export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () => void }) {
   const confirm = useMutation(api.recipes.confirm);
   const [sheet, setSheet] = useState<SheetState | null>(null);
+  const [skipped, setSkipped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const close = () => setSheet(null);
   const hasName = recipe.name.trim() !== "";
+  const queue = checkQueue(recipe.lines);
+
+  if (queue.length > 0 && !skipped) {
+    const item = queue[0];
+    return (
+      <section className="page">
+        <TopBar title={recipe.name || "Kontrola"} />
+        <PhotoPane photos={recipe.photos} />
+        <p className="qcount">
+          Ke kontrole ještě {queue.length}
+          <button className="link inline" onClick={() => setSkipped(true)}>
+            Přeskočit na shrnutí
+          </button>
+        </p>
+        <NewIngredientCard key={item.line._id} line={item.line} />
+      </section>
+    );
+  }
 
   async function save() {
     setBusy(true);
@@ -55,7 +84,16 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
     <section className="page with-bar">
       <TopBar title={recipe.name || "Shrnutí"} />
       <PhotoPane photos={recipe.photos} />
-      <p className="banner">Zkontroluj recept s fotkou. Ťukni na cokoli pro úpravu.</p>
+      {queue.length > 0 ? (
+        <div className="banner warn frow">
+          <span className="grow">Zbývá {queue.length} k ověření.</span>
+          <button className="chip" onClick={() => setSkipped(false)}>
+            Projít
+          </button>
+        </div>
+      ) : (
+        <p className="banner">✓ Vše zkontrolováno. Ťukni na cokoli pro úpravu.</p>
+      )}
 
       <div className="rcard">
         <button className="sumline" onClick={() => setSheet({ kind: "basics" })}>
@@ -76,7 +114,10 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
         {recipe.lines.map((l) => (
           <button key={l._id} className="sumline" onClick={() => setSheet({ kind: "line", line: l })}>
             <span>{amountUnit(l)}</span>
-            <span className="printed">{l.raw}</span>
+            <span>
+              {lineIngredientName(l) || <span className="printed">{l.raw}</span>}
+              <LineBadges line={l} />
+            </span>
           </button>
         ))}
         {recipe.lines.length === 0 && <p className="muted pad">Žádné suroviny.</p>}
@@ -108,8 +149,18 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
         <button className="btn danger" onClick={() => setSheet({ kind: "discard" })} disabled={busy}>
           Zahodit
         </button>
-        <button className="btn primary grow" onClick={save} disabled={busy || !hasName}>
-          {busy ? "Ukládám…" : hasName ? "Uložit recept" : "Nejdřív doplň název"}
+        <button
+          className="btn primary grow"
+          onClick={save}
+          disabled={busy || !hasName || queue.length > 0}
+        >
+          {busy
+            ? "Ukládám…"
+            : queue.length > 0
+              ? `Nejdřív zkontroluj (${queue.length})`
+              : hasName
+                ? "Uložit recept"
+                : "Nejdřív doplň název"}
         </button>
       </div>
 
@@ -232,6 +283,11 @@ function LineSheet({
   const [raw, setRaw] = useState(line?.raw ?? "");
   const [amount, setAmount] = useState(formatAmount(line?.amount));
   const [unit, setUnit] = useState(line?.unit ?? "");
+  const [ingredientName, setIngredientName] = useState(line ? lineIngredientName(line) : "");
+  const [optional, setOptional] = useState(line?.optional ?? false);
+  const [picking, setPicking] = useState(false);
+  const ingredients = useQuery(api.ingredients.list);
+  const known = ingredients?.some((i) => ingredientKey(i.name) === ingredientKey(ingredientName));
   const { busy, error, setError, run } = useSave(onClose);
 
   function submit(e: React.FormEvent) {
@@ -241,60 +297,98 @@ function LineSheet({
     // A new line may be typed as just amount + unit + name; the text is required.
     const text = raw.trim();
     if (!text) return setError("Napiš řádek tak, jak je v knize.");
-    const value = { raw: text, amount: parsed, unit: unit.trim() || undefined };
+    const value = {
+      raw: text,
+      amount: parsed,
+      unit: unit.trim() || undefined,
+      ingredientName: ingredientName.trim(),
+      optional,
+    };
     void run(() => (line ? update({ lineId: line._id, line: value }) : add({ recipeId, line: value })));
   }
 
   return (
-    <Sheet title={line ? "Řádek suroviny" : "Nová surovina"} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        <label className="lbl">
-          Jak je to v knize
-          <input
-            className="finput printed"
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-            placeholder="např. 25 dkg hladké mouky"
-            autoFocus={!line}
-          />
-        </label>
-        <div className="frow">
-          <label className="lbl grow">
-            Množství
+    <>
+      <Sheet title={line ? "Řádek suroviny" : "Nový řádek"} onClose={onClose}>
+        <form className="stack" onSubmit={submit}>
+          <label className="lbl">
+            Jak je to v knize
             <input
-              className="finput"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="25"
+              className="finput printed"
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              placeholder="např. 25 dkg hladké mouky"
+              autoFocus={!line}
             />
           </label>
-          <label className="lbl grow">
-            Jednotka
+          <div className="frow">
+            <label className="lbl grow">
+              Množství
+              <input
+                className="finput"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="25"
+              />
+            </label>
+            <label className="lbl grow">
+              Jednotka
+              <input
+                className="finput"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                placeholder="dkg, g, l, lžíce…"
+              />
+            </label>
+          </div>
+          <label className="lbl">
+            Surovina (co se kupuje)
             <input
               className="finput"
-              value={unit}
-              onChange={(e) => setUnit(e.target.value)}
-              placeholder="dkg, g, l, lžíce…"
+              list="household-ingredients"
+              value={ingredientName}
+              onChange={(e) => setIngredientName(e.target.value)}
+              placeholder="např. hladká mouka"
             />
+            <datalist id="household-ingredients">
+              {ingredients?.map((i) => <option key={i._id} value={i.name} />)}
+            </datalist>
           </label>
-        </div>
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="btn primary" type="submit" disabled={busy}>
-          {line ? "Hotovo" : "Přidat"}
-        </button>
-        {line && (
-          <button
-            className="btn danger"
-            type="button"
-            disabled={busy}
-            onClick={() => void run(() => remove({ lineId: line._id }))}
-          >
-            Smazat řádek
+          {ingredientName.trim() && (
+            <small className="muted">
+              {known
+                ? "✓ Surovina domácnosti"
+                : "Nová surovina – zkontroluješ ji před uložením receptu"}
+            </small>
+          )}
+          {line && ingredients && ingredients.length > 0 && (
+            <button type="button" className="link inline" onClick={() => setPicking(true)}>
+              Vybrat ze surovin domácnosti…
+            </button>
+          )}
+          <label className="check">
+            <input type="checkbox" checked={optional} onChange={(e) => setOptional(e.target.checked)} />
+            Volitelné (na nákupu s poznámkou „volitelné“)
+          </label>
+          {error && <p className="error" role="alert">{error}</p>}
+          <button className="btn primary" type="submit" disabled={busy}>
+            {line ? "Hotovo" : "Přidat"}
           </button>
-        )}
-      </form>
-    </Sheet>
+          {line && (
+            <button
+              className="btn danger"
+              type="button"
+              disabled={busy}
+              onClick={() => void run(() => remove({ lineId: line._id }))}
+            >
+              Smazat řádek
+            </button>
+          )}
+        </form>
+      </Sheet>
+      {picking && line && <IngredientPicker lineId={line._id} onClose={onClose} />}
+    </>
   );
 }
 
