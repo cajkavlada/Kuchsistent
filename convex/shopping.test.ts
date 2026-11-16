@@ -571,6 +571,20 @@ describe("marks, warnings and the item sheet (#29)", () => {
       ["Guláš", "2026-11-16", "lunch", 4],
       ["Guláš", "2026-11-17", "dinner", 6],
     ]);
+    // Leftovers cooked with a meal show beside it.
+    const lunch = sheet!.sources[0]._id;
+    await t.run((ctx) =>
+      ctx.db.insert("leftoverPortions", {
+        household: m.household,
+        sourceMeal: lunch,
+        date: "2026-11-17",
+        slot: "lunch",
+        order: 1,
+        portions: 2,
+      }),
+    );
+    const after = await t.run((ctx) => itemFor(ctx, m, i._id));
+    expect(after!.sources.map((s) => s.leftoverPortions)).toEqual([2, 0]);
     // Not visible to another Household.
     const other = await newMember(t, "b@example.com");
     expect(await t.run((ctx) => itemFor(ctx, other, i._id))).toBeNull();

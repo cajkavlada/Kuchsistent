@@ -106,6 +106,7 @@ export function ItemSheet({
               <li key={m._id}>
                 🍽 <b>{m.recipeName}</b> – {dayLabel(m.date)} {SLOT_LABEL[m.slot].toLowerCase()} ·{" "}
                 {m.portions} {portionsWord(m.portions)}
+                {m.leftoverPortions > 0 ? ` + ${m.leftoverPortions} na zbytky` : ""}
                 {m.occasion ? ` · ${m.occasion}` : ""}
               </li>
             ))}

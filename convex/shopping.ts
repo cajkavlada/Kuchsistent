@@ -481,12 +481,18 @@ export async function itemFor(ctx: QueryCtx, member: Member, itemId: Id<"shoppin
     const meal = await cache.meal(id);
     if (!meal) continue;
     const recipe = await ctx.db.get("recipes", meal.recipe);
+    const leftovers = await ctx.db
+      .query("leftoverPortions")
+      .withIndex("by_source", (q) => q.eq("sourceMeal", meal._id))
+      .collect();
     sources.push({
       _id: meal._id,
       recipeName: recipe?.name ?? "Smazaný recept",
       date: meal.date,
       slot: meal.slot,
       portions: meal.portions,
+      /** Leftover Portions cooked with it (#24), counted in the amount. */
+      leftoverPortions: leftovers.reduce((n, l) => n + l.portions, 0),
       occasion: meal.occasion,
     });
   }
