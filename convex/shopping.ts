@@ -1,13 +1,14 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { today as pragueToday, type CalendarDay } from "./lib/dates";
-import type { StoreSection } from "./lib/ingredients";
-import { requireMember, type Member } from "./lib/membership";
+import { freshnessDaysFor, type FreshnessClass, type StoreSection } from "./lib/ingredients";
+import { assertSameHousehold, requireMember, type Member } from "./lib/membership";
 import {
   DEFAULT_TRIP_INTERVAL_DAYS,
   diffParts,
   formatParts,
+  freshnessWarning,
   NOT_NEEDED,
   newTripDates,
   portionsPhrase,
@@ -23,7 +24,8 @@ import {
 /**
  * The shopping list (#27, #28; decisions #5, #6, #7, #10, #13): Shopping Trips
  * and their Shopping Items, regenerated from the Planned Meals (with their
- * Leftover Portions) whenever anything they depend on changes.
+ * Leftover Portions) whenever anything they depend on changes. Plenty,
+ * Optional Lines, freshness warnings and the item sheet are #29.
  */
 
 // ---------- regeneration ----------
@@ -36,9 +38,11 @@ type Desired = {
   sourceMeals: Id<"plannedMeals">[];
   topUp: boolean;
   note?: string;
+  optional: boolean;
 };
 
-type MealNeed = { ingredient: Doc<"ingredients">; needs: Need[] };
+/** `optional`: every line of the meal's Recipe for this Ingredient is an Optional Line. */
+type MealNeed = { ingredient: Doc<"ingredients">; needs: Need[]; optional: boolean };
 
 const itemKey = (
   trip: Id<"shoppingTrips">,
@@ -138,8 +142,9 @@ export async function regenerateShopping(
       }
       const ingredient = ingredients.get(line.ingredient);
       if (!ingredient || ingredient.household !== household || ingredient.neverBuy) continue;
-      const e = out.get(ingredient._id) ?? { ingredient, needs: [] };
+      const e = out.get(ingredient._id) ?? { ingredient, needs: [], optional: true };
       e.needs.push({ amount: line.amount, unit: line.unit, scale });
+      e.optional &&= line.optional === true;
       out.set(ingredient._id, e);
     }
     return out;
@@ -199,6 +204,7 @@ export async function regenerateShopping(
       parts: [],
       sourceMeals: [],
       topUp: true,
+      optional: false,
     };
     d.parts = sumParts([...d.parts, ...more]);
     d.sourceMeals = [...new Set([...d.sourceMeals, ...live.map((m) => m._id)])];
@@ -213,16 +219,33 @@ export async function regenerateShopping(
   }
 
   // Everything not covered by a tick goes to its meal's trip.
-  const needs = new Map<string, { trip: Id<"shoppingTrips">; ingredient: Doc<"ingredients">; needs: Need[]; meals: Set<Id<"plannedMeals">> }>();
+  const needs = new Map<
+    string,
+    {
+      trip: Id<"shoppingTrips">;
+      ingredient: Doc<"ingredients">;
+      needs: Need[];
+      meals: Set<Id<"plannedMeals">>;
+      optional: boolean;
+    }
+  >();
   for (const meal of meals) {
     const trip = tripOf(meal);
     if (!trip) continue;
     for (const [ing, e] of await needsOf(meal)) {
       if (covered.has(`${meal._id}|${ing}`)) continue;
       const key = itemKey(trip._id, ing, false);
-      const entry = needs.get(key) ?? { trip: trip._id, ingredient: e.ingredient, needs: [], meals: new Set() };
+      const entry = needs.get(key) ?? {
+        trip: trip._id,
+        ingredient: e.ingredient,
+        needs: [],
+        meals: new Set(),
+        optional: true,
+      };
       entry.needs.push(...e.needs);
       entry.meals.add(meal._id);
+      // "volitelné" only while every line behind the item is optional.
+      entry.optional &&= e.optional;
       needs.set(key, entry);
     }
   }
@@ -234,6 +257,7 @@ export async function regenerateShopping(
       parts: totalOf(e.ingredient.measureKind, e.needs),
       sourceMeals: [...e.meals],
       topUp: false,
+      optional: e.optional,
     });
   }
 
@@ -319,6 +343,7 @@ function itemFields(d: Desired) {
     sourceMeals: d.sourceMeals,
     note: d.note,
     topUp: d.topUp || undefined,
+    optional: d.optional || undefined,
   };
 }
 
@@ -329,7 +354,8 @@ function sameFields(item: Doc<"shoppingItems">, f: ReturnType<typeof itemFields>
     item.unit === f.unit &&
     item.note === f.note &&
     JSON.stringify(item.moreAmounts ?? null) === JSON.stringify(f.moreAmounts ?? null) &&
-    JSON.stringify(item.sourceMeals) === JSON.stringify(f.sourceMeals)
+    JSON.stringify(item.sourceMeals) === JSON.stringify(f.sourceMeals) &&
+    (item.optional ?? undefined) === f.optional
   );
 }
 
@@ -349,18 +375,22 @@ export const refresh = mutation({
 
 // ---------- reading ----------
 
-/** Nákup: trips from today on (and older ones with something left), each with its items. */
+/**
+ * Nákup: trips from today on (and older ones with something left), each with
+ * its items, their marks (Plenty, volitelné, notes) and freshness warnings (#29).
+ */
 export const list = query({
   args: {},
   handler: async (ctx) => listFor(ctx, await requireMember(ctx)),
 });
 
 export async function listFor(ctx: QueryCtx, member: Member, today: CalendarDay = pragueToday()) {
+  const household = await ctx.db.get("households", member.household);
   const trips = await ctx.db
     .query("shoppingTrips")
     .withIndex("by_household_date", (q) => q.eq("household", member.household))
     .collect();
-  const sections = new Map<Id<"ingredients">, StoreSection>();
+  const cache = lookups(ctx);
   const result = [];
   for (const trip of trips) {
     const rows = await ctx.db
@@ -370,16 +400,11 @@ export async function listFor(ctx: QueryCtx, member: Member, today: CalendarDay 
     if (trip.date < today && rows.every((i) => i.checked)) continue;
     const items = [];
     for (const i of rows) {
-      let storeSection: StoreSection = "other";
-      if (i.ingredient) {
-        if (!sections.has(i.ingredient)) {
-          const ing = await ctx.db.get("ingredients", i.ingredient);
-          sections.set(i.ingredient, ing?.storeSection ?? "other");
-        }
-        storeSection = sections.get(i.ingredient)!;
-      }
+      const ing = i.ingredient ? await cache.ingredient(i.ingredient) : null;
+      const plenty = !i.manual && ing?.plenty === true;
       items.push({
         _id: i._id,
+        ingredient: i.ingredient,
         label: i.label,
         amount: i.amount,
         unit: i.unit,
@@ -388,12 +413,149 @@ export async function listFor(ctx: QueryCtx, member: Member, today: CalendarDay 
         manual: i.manual,
         note: i.note,
         topUp: i.topUp ?? false,
-        storeSection,
+        storeSection: (ing?.storeSection ?? "other") as StoreSection,
+        plenty,
+        optional: i.optional === true,
+        fresh:
+          i.checked || plenty || !ing
+            ? null
+            : await warningFor(cache, household?.freshnessDays, ing.freshnessClass, trip.date, i.sourceMeals),
       });
     }
     result.push({ _id: trip._id, date: trip.date, kind: trip.kind, status: trip.status, items });
   }
   return { today, trips: result };
+}
+
+/** Per-request caches of Ingredients and Planned Meals. */
+function lookups(ctx: QueryCtx) {
+  const ingredients = new Map<Id<"ingredients">, Doc<"ingredients"> | null>();
+  const meals = new Map<Id<"plannedMeals">, Doc<"plannedMeals"> | null>();
+  return {
+    async ingredient(id: Id<"ingredients">) {
+      if (!ingredients.has(id)) ingredients.set(id, await ctx.db.get("ingredients", id));
+      return ingredients.get(id)!;
+    },
+    async meal(id: Id<"plannedMeals">) {
+      if (!meals.has(id)) meals.set(id, await ctx.db.get("plannedMeals", id));
+      return meals.get(id)!;
+    },
+  };
+}
+
+async function warningFor(
+  cache: ReturnType<typeof lookups>,
+  overrides: Doc<"households">["freshnessDays"],
+  freshnessClass: FreshnessClass,
+  tripDate: CalendarDay,
+  sourceMeals: Id<"plannedMeals">[],
+) {
+  const dates: CalendarDay[] = [];
+  for (const id of sourceMeals) {
+    const meal = await cache.meal(id);
+    if (meal) dates.push(meal.date);
+  }
+  return freshnessWarning(tripDate, dates, freshnessDaysFor(overrides, freshnessClass));
+}
+
+/**
+ * The item sheet (#10, #29): what, where and when to buy, why ("Proč to
+ * kupuju": the Planned Meals behind it), its freshness warning, notes and
+ * marks. Null once the item is gone (e.g. regenerated away while open).
+ */
+export const item = query({
+  args: { itemId: v.id("shoppingItems") },
+  handler: async (ctx, { itemId }) => itemFor(ctx, await requireMember(ctx), itemId),
+});
+
+export async function itemFor(ctx: QueryCtx, member: Member, itemId: Id<"shoppingItems">) {
+  const i = await ctx.db.get("shoppingItems", itemId);
+  if (i === null || i.household !== member.household) return null;
+  const trip = await ctx.db.get("shoppingTrips", i.trip);
+  if (trip === null) return null;
+  const household = await ctx.db.get("households", member.household);
+  const cache = lookups(ctx);
+  const ing = i.ingredient ? await cache.ingredient(i.ingredient) : null;
+  const sources = [];
+  for (const id of i.sourceMeals) {
+    const meal = await cache.meal(id);
+    if (!meal) continue;
+    const recipe = await ctx.db.get("recipes", meal.recipe);
+    const leftovers = await ctx.db
+      .query("leftoverPortions")
+      .withIndex("by_source", (q) => q.eq("sourceMeal", meal._id))
+      .collect();
+    sources.push({
+      _id: meal._id,
+      recipeName: recipe?.name ?? "Smazaný recept",
+      date: meal.date,
+      slot: meal.slot,
+      portions: meal.portions,
+      /** Leftover Portions cooked with it (#24), counted in the amount. */
+      leftoverPortions: leftovers.reduce((n, l) => n + l.portions, 0),
+      occasion: meal.occasion,
+    });
+  }
+  sources.sort((a, b) => a.date.localeCompare(b.date) || a.slot.localeCompare(b.slot));
+  const plenty = !i.manual && ing?.plenty === true;
+  const freshDays = ing ? freshnessDaysFor(household?.freshnessDays, ing.freshnessClass) : null;
+  return {
+    _id: i._id,
+    label: i.label,
+    amount: i.amount,
+    unit: i.unit,
+    moreAmounts: i.moreAmounts,
+    checked: i.checked,
+    manual: i.manual,
+    topUp: i.topUp ?? false,
+    optional: i.optional === true,
+    note: i.note,
+    /** "už nepotřeba" for the whole item (not just part of it): it can be deleted. */
+    notNeeded: i.note === NOT_NEEDED,
+    trip: { _id: trip._id, date: trip.date, kind: trip.kind },
+    ingredient: ing
+      ? {
+          _id: ing._id,
+          name: ing.name,
+          storeSection: ing.storeSection,
+          freshnessClass: ing.freshnessClass,
+          freshnessDays: freshDays,
+          plenty: ing.plenty,
+        }
+      : null,
+    plenty,
+    fresh:
+      i.checked || plenty || !ing
+        ? null
+        : freshnessWarning(trip.date, sources.map((s) => s.date), freshDays),
+    sources,
+  };
+}
+
+// ---------- removing ----------
+
+/**
+ * "Smazat" on the item sheet (#29): removes an item whose meals no longer
+ * need any of it (note exactly "už nepotřeba", #28). An item that's only
+ * partly unneeded ("už nepotřeba: 200 g") still covers a meal and stays.
+ */
+export const removeItem = mutation({
+  args: { itemId: v.id("shoppingItems") },
+  returns: v.null(),
+  handler: async (ctx, { itemId }) => removeItemFor(ctx, await requireMember(ctx), itemId),
+});
+
+export async function removeItemFor(
+  ctx: MutationCtx,
+  member: Member,
+  itemId: Id<"shoppingItems">,
+): Promise<null> {
+  const item = await ctx.db.get("shoppingItems", itemId);
+  if (item === null) return null; // already gone: nothing to do
+  assertSameHousehold(member, item);
+  if (item.note !== NOT_NEEDED) throw new ConvexError({ code: "ITEM_NOT_REMOVABLE" });
+  await ctx.db.delete("shoppingItems", itemId);
+  return null;
 }
 
 // ---------- ticking ----------

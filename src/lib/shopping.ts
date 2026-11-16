@@ -1,4 +1,4 @@
-import { STORE_SECTIONS, type StoreSection } from "@convex/lib/ingredients";
+import { daysLabel, STORE_SECTIONS, type StoreSection } from "@convex/lib/ingredients";
 import { formatParts, NOT_NEEDED, type Part } from "@convex/lib/shopping";
 
 /** What the list needs of a Shopping Item. */
@@ -47,4 +47,27 @@ export function groupBySection<T extends ListItem>(items: T[]) {
 export function progress(items: { checked: boolean }[]) {
   const done = items.filter((i) => i.checked).length;
   return { done, total: items.length, left: items.length - done };
+}
+
+/**
+ * A trip's items split for Nákup (#29): Plenty items go to the "Máme dost"
+ * box at the bottom and don't count towards progress; the rest is the list.
+ */
+export function splitPlenty<T extends { plenty: boolean }>(items: T[]) {
+  return { list: items.filter((i) => !i.plenty), plenty: items.filter((i) => i.plenty) };
+}
+
+/** How many of a trip's items carry a freshness warning (shown in the trip header). */
+export function freshCount(items: { fresh: unknown }[]): number {
+  return items.filter((i) => i.fresh).length;
+}
+
+/** Row badge: "⚠ nebude čerstvé · 3 dny předem (max 2)". */
+export function freshBadge(w: { gap: number; max: number }): string {
+  return `⚠ nebude čerstvé · ${daysLabel(w.gap)} předem (max ${w.max})`;
+}
+
+/** Item sheet: why the warning is there. */
+export function freshExplanation(w: { gap: number; max: number }, className: string): string {
+  return `Kupuješ ${daysLabel(w.gap)} před jídlem, ale „${className}" vydrží jen ${daysLabel(w.max)}. Je to jen upozornění – položka na seznamu zůstává.`;
 }

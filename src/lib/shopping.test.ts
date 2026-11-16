@@ -1,5 +1,15 @@
 import { expect, test } from "vitest";
-import { groupBySection, itemAmount, noteTone, progress, type ListItem } from "./shopping";
+import {
+  freshBadge,
+  freshCount,
+  freshExplanation,
+  groupBySection,
+  itemAmount,
+  noteTone,
+  progress,
+  splitPlenty,
+  type ListItem,
+} from "./shopping";
 
 const item = (label: string, storeSection: ListItem["storeSection"], checked = false): ListItem => ({
   label,
@@ -45,4 +55,24 @@ test("top-ups show what they add; notes get their tone", () => {
   );
   expect(noteTone("už nepotřeba: 500 g")).toBe("gone");
   expect(noteTone("navýšení: Guláš na 6 porcí")).toBe("delta");
+});
+
+test("Plenty items are split off and don't count towards progress", () => {
+  const items = [
+    { label: "sůl", plenty: true, checked: false, fresh: null },
+    { label: "mrkev", plenty: false, checked: true, fresh: null },
+    { label: "hovězí", plenty: false, checked: false, fresh: { gap: 3, max: 2 } },
+  ];
+  const { list, plenty } = splitPlenty(items);
+  expect(plenty.map((i) => i.label)).toEqual(["sůl"]);
+  expect(progress(list)).toEqual({ done: 1, total: 2, left: 1 });
+  expect(freshCount(list)).toBe(1);
+});
+
+test("freshness texts", () => {
+  expect(freshBadge({ gap: 3, max: 2 })).toBe("⚠ nebude čerstvé · 3 dny předem (max 2)");
+  expect(freshBadge({ gap: 6, max: 5 })).toBe("⚠ nebude čerstvé · 6 dní předem (max 5)");
+  expect(freshExplanation({ gap: 2, max: 1 }, "Velmi čerstvé")).toBe(
+    "Kupuješ 2 dny před jídlem, ale „Velmi čerstvé\" vydrží jen 1 den. Je to jen upozornění – položka na seznamu zůstává.",
+  );
 });

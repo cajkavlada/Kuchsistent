@@ -146,6 +146,31 @@ export async function updateFor(
 }
 
 /**
+ * Sets or clears Plenty ("Máme dost", #29). It's a standing mark on the
+ * Ingredient, so it applies on every trip; "Dochází" clears it. Plenty items
+ * stay generated (they're listed in the "Máme dost" box), so the list isn't
+ * regenerated.
+ */
+export const setPlenty = mutation({
+  args: { ingredientId: v.id("ingredients"), plenty: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, { ingredientId, plenty }) =>
+    setPlentyFor(ctx, await requireMember(ctx), ingredientId, plenty),
+});
+
+export async function setPlentyFor(
+  ctx: MutationCtx,
+  member: Member,
+  ingredientId: Id<"ingredients">,
+  plenty: boolean,
+): Promise<null> {
+  const ingredient = await ctx.db.get("ingredients", ingredientId);
+  assertSameHousehold(member, ingredient);
+  if (ingredient.plenty !== plenty) await ctx.db.patch("ingredients", ingredientId, { plenty });
+  return null;
+}
+
+/**
  * Merge duplicates (#6, #22): every Ingredient Line of `from` moves to
  * `into` (the survivor keeps its own name and marks), then `from` is deleted.
  */

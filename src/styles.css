@@ -453,25 +453,64 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .srows { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 .srows li + li { border-top: 1px solid var(--line); }
 .srow {
-  width: 100%; min-height: 52px; display: flex; align-items: center; gap: 12px; padding: 10px 12px;
-  background: none; border: 0; font: inherit; color: var(--fg); text-align: left; cursor: pointer;
+  width: 100%; min-height: 52px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 0;
+  color: var(--fg);
 }
+/* The circle ticks (#29); a 48 px hit area around the 26 px circle. */
 .srow .ck {
-  flex: none; width: 26px; height: 26px; border-radius: 50%; border: 2px solid #a8a29e;
+  flex: none; width: 48px; align-self: stretch; padding: 0; border: 0; background: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.srow .dot {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid #a8a29e;
   display: flex; align-items: center; justify-content: center; color: #fff; font-size: .9rem;
 }
-.srow .nm { flex: 1; min-width: 0; font-weight: 500; }
+/* The name opens the item sheet (#29). */
+.srow .nm {
+  flex: 1; min-width: 0; min-height: 52px; padding: 8px 0; border: 0; background: none; font: inherit;
+  color: inherit; text-align: left; cursor: pointer; display: flex; flex-direction: column;
+  justify-content: center; align-items: flex-start;
+}
+.srow .nmt { font-weight: 500; }
 .srow .amt { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
 .srow .amt.none { color: var(--muted); font-weight: 400; }
-/* Regeneration notes (#28): inline-block so a ticked row's line-through skips them. */
+/* Regeneration notes (#28): not struck through on a ticked row. */
 .srow .snote {
-  display: inline-block; margin: 2px 0 0 6px; padding: 1px 7px; border-radius: 999px;
-  font-size: .72rem; font-weight: 600; text-decoration: none; vertical-align: 1px;
+  display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px;
+  font-size: .72rem; font-weight: 600;
 }
 .srow .snote.delta { background: #dcfce7; color: var(--green); }
 .srow .snote.gone { background: #fee2e2; color: var(--danger); }
-.srow.done .ck { background: var(--green); border-color: var(--green); }
-.srow.done .nm { text-decoration: line-through; color: var(--muted); }
+.srow.done .dot { background: var(--green); border-color: var(--green); }
+.srow.done .nmt { text-decoration: line-through; color: var(--muted); }
 .srow.done .amt { color: var(--muted); }
 .srow.flash { animation: srow-flash 1.6s; }
 @keyframes srow-flash { from { background: #bbf7d0; } to { background: transparent; } }
+
+/* Marks and warnings on list rows (#29) */
+.badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.bd { font-size: .72rem; padding: 1px 7px; border-radius: 999px; background: #f1eee8; color: var(--muted); font-weight: 600; }
+.bd.w { background: var(--warn); color: var(--warn-ink); }
+.mini {
+  min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff;
+  font: inherit; font-size: .8rem; font-weight: 600; color: var(--fg); cursor: pointer;
+}
+/* "Máme dost" box */
+.plenty { background: #f5f5f4; border: 1px dashed #d6d3d1; border-radius: 14px; margin-top: 18px; padding: 6px 12px 10px; }
+.plenty h3 { margin: 6px 0 2px; font-size: .9rem; display: flex; gap: 6px; align-items: center; }
+.plenty h3 span { flex: 1; }
+.plist { list-style: none; margin: 6px 0 0; padding: 0; }
+.plist li { display: flex; align-items: center; gap: 8px; border-top: 1px solid #e7e5e4; }
+.plist .nm { flex: 1; min-height: 46px; border: 0; background: none; font: inherit; color: var(--fg); text-align: left; padding: 0; cursor: pointer; }
+/* Item sheet */
+.isheet-head { display: flex; align-items: baseline; gap: 10px; }
+.isheet-head h2 { flex: 1; }
+.isheet-head .amt { font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.isheet-head .amt.none { color: var(--muted); font-weight: 400; }
+.isheet-sub { margin: 0 0 4px; font-size: .9rem; }
+.why { border-radius: 10px; padding: 10px 12px; font-size: .9rem; background: #f1eee8; }
+.why.warn { background: var(--warn); color: var(--warn-ink); }
+.why.gone { background: #fee2e2; color: var(--danger); }
+.why.delta { background: #dcfce7; color: var(--green); }
+.why-list { list-style: none; margin: 0; padding: 10px 12px; border-radius: 10px; background: #f1eee8; display: flex; flex-direction: column; gap: 6px; font-size: .9rem; }
+.plenty-toggle { border-top: 1px solid var(--line); padding-top: 10px; }
