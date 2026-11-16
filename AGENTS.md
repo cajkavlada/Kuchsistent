@@ -9,17 +9,14 @@ Kuchsistent: Czech household cooking assistant (recipe photos → meal plan → 
 3. Branch from the latest `main`: `feat/<N>-<slug>`.
 4. Build the whole vertical slice: schema, Convex functions, UI, tests.
 5. **Checks**, before every push and again whenever told another PR was merged: rebase onto the latest `main`, resolve conflicts, run `npm run codegen`, `npm run typecheck`, `npm test`, and a placeholder build (`VITE_CONVEX_URL=https://x-1.convex.cloud npm run build`).
-6. **Preview first, no PR yet.** Push the branch. Vercel builds a preview for every pushed branch, with its own empty Convex backend and the fake "Testovací přihlášení" (see Auth and deploy facts). If the feature needs data to try out (Recipes, a plan…), add it to `seed:preview` in `convex/seed.ts`. Wait for the Vercel commit status (`gh api repos/cajkavlada/kuchsistent/commits/<sha>/status`) to be `success`, then send the user:
-   - the preview URL: `https://kuchsistent-git-<branch, "/" → "-">-vc-ajka.vercel.app` (e.g. `kuchsistent-git-feat-15-invite-member-vc-ajka.vercel.app`; the sandbox can't open it, and Vercel shortens very long branch names, so if unsure point to the Vercel link in the commit status);
-   - step-by-step what to test on the phone, using Tester A/B/C (a second tester in an Incognito tab or on another phone);
-   - any Convex env vars production will need.
-7. **Iterate.** Apply the user's tweaks and push again. Each push recreates the preview backend, so test data starts over.
-8. **PR only after the user approves the preview.** Rebase and run the checks again, then open the PR (body: what was built, notes for review, "Part of #N" / "Implements #N"). Merge only when the user says so; merging to `main` deploys production.
-9. **After merging**, in the same turn:
-   - wait for the Vercel status on the merge commit to be `success` (production is live);
-   - close the issue (`state=closed`, `state_reason=completed`) with a comment linking the PR and any notes later tickets need;
-   - delete the merged branch (`gh api -X DELETE repos/cajkavlada/kuchsistent/git/refs/heads/<branch>`);
-   - remind the user to delete the branch's Convex preview deployment in the Convex dashboard (the deployment named `preview/<branch>`). The sandbox can't reach Convex, so this step is the user's. Undeleted previews expire after 5 days anyway.
+6. **Open the PR.** Push the branch and open the PR (body: what was built, notes for review, "Part of #N" / "Implements #N"). There are **no preview deploys**: pushing a branch builds nothing on Vercel. Tell the user:
+   - step by step what to test on the phone once it's in production;
+   - any Convex env vars production will need (they must be set **before** merging, or the deploy or the feature fails).
+7. **Merge only when the user says so.** Merging to `main` deploys production (https://kuchsistent.vercel.app). Wait for the Vercel status on the merge commit (`gh api repos/cajkavlada/kuchsistent/commits/<sha>/status`) to be `success`, then tell the user it's live and repeat the test steps.
+8. **Fix forward.** If the user finds a problem on production, fix it on a new branch (`fix/<N>-<slug>`) with a new PR; production is the only place to try things.
+9. **When the user confirms it works**: close the issue (`state=closed`, `state_reason=completed`) with a comment linking the PR(s) and any notes later tickets need, and delete the merged branches (`gh api -X DELETE repos/cajkavlada/kuchsistent/git/refs/heads/<branch>`).
+
+No mock or seed data: the app starts empty and the user enters real data. Don't add sample data to `convex/seed.ts`.
 
 Branches named `prototype/*` and `research/*` are reference only. Read them, never merge them.
 
@@ -43,7 +40,7 @@ Branches named `prototype/*` and `research/*` are reference only. Read them, nev
 
 ## Auth and deploy facts
 
-- Convex Auth v2 is component-based: `convex/convex.config.ts` mounts `auth` and `authGoogle` (plus `authPassword` + `authUsername` for the preview-only test sign-in); `convex/auth.ts` wires the methods; users are created in `convex/users.ts`. Google's callback is `<CONVEX_SITE_URL>/oauth/google/callback`.
+- Convex Auth v2 is component-based: `convex/convex.config.ts` mounts `auth` and `authGoogle` (plus `authPassword` + `authUsername`, left over from the retired preview test sign-in); `convex/auth.ts` wires the methods; users are created in `convex/users.ts`. Google's callback is `<CONVEX_SITE_URL>/oauth/google/callback`.
 - OAuth must return to a page that doesn't redirect (currently `/plan`); a redirect drops the `code` param and sign-in silently fails.
 - Convex env vars: `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET`, `SITE_URL`, `HOUSEHOLD_CREATOR_EMAILS`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, optional `EXTRACTION_MODELS` (recipe reading, see `convex/lib/config.ts`; the action is `convex/extractNode.ts`, which calls no real model in tests). `SITE_URL` is read when modules load, so a change needs a redeploy. Never use the `VITE_` prefix for secrets.
-- Every PR gets a Vercel preview with its own Convex preview backend, recreated empty on every push (`scripts/vercel-build.sh`) and seeded by `seed:preview` in `convex/seed.ts` (add sample data there when useful). Google sign-in can't complete on previews; `seed:preview` turns on a fake "Testovací přihlášení" (Tester A/B/C, `convex/testLogin.ts`) so branches can be tested on a phone. On production `testMode` never exists, so the test sign-in is hidden and refuses to create accounts; never write `testMode` outside `seed:preview`. Previews sit behind Vercel deployment protection: the user must be signed in to Vercel, or use a Share link from the Vercel dashboard for another phone. Production: https://kuchsistent.vercel.app (Vercel functions in `fra1`).
+- **No previews.** `vercel.json`'s `ignoreCommand` skips every non-production build, so only `main` deploys (`scripts/vercel-build.sh` → `convex deploy` to production). The fake "Testovací přihlášení" (`convex/testLogin.ts`, `src/components/TestLogin.tsx`, `testMode`, `seed:preview`) is retired: it only switched on for preview backends, so it never shows in production. Don't use or extend it. Production: https://kuchsistent.vercel.app (Vercel functions in `fra1`).

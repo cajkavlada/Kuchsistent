@@ -4,5 +4,6 @@
   "buildCommand": "sh scripts/vercel-build.sh",
   "regions": [
     "fra1"
-  ]
+  ],
+  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]"
 }

@@ -28,7 +28,7 @@ Checks: `npm run typecheck`, `npm test`.
 - Authorized redirect URI: `https://<deployment>.convex.site/oauth/google/callback`, one per Convex deployment you sign in on (production and dev).
 - OAuth consent screen: External. Scopes are only `openid email profile`.
 
-**Convex env vars** (production and dev deployments; for previews, set them as the project's default environment variables for preview deployments):
+**Convex env vars** (production deployment, and dev if you run locally):
 
 | Name | Value |
 |---|---|
@@ -42,9 +42,6 @@ Checks: `npm run typecheck`, `npm test`.
 
 **Vercel** (import the repo; `vercel.json` sets the framework and build command):
 - `CONVEX_DEPLOY_KEY` = a Convex *Production* deploy key, scoped to the Production environment.
-- `CONVEX_DEPLOY_KEY` = a Convex *Preview* deploy key, scoped to the Preview environment.
 - No secrets with the `VITE_` prefix; `VITE_CONVEX_URL` is injected by `convex deploy`.
 
-Each pushed branch then gets a Vercel preview backed by its own fresh Convex preview backend (seeded by `seed:preview`); merging to `main` deploys production.
-
-Google sign-in on preview deploys can't complete, because each preview backend has its own `*.convex.site` callback URL that isn't registered with Google. Instead, `seed:preview` turns on a fake "Testovací přihlášení" (Tester A/B/C) on preview backends only; production never has it. Every push to a branch recreates its preview backend (`scripts/vercel-build.sh`), so preview data starts empty each time.
+Merging to `main` deploys production. There are no preview deploys: `vercel.json`'s `ignoreCommand` skips every non-production build, so pushed branches build nothing and no Convex preview backends are created.
