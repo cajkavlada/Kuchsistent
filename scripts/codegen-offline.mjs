@@ -12,6 +12,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COMPONENTS = {
   auth: "@convex-dev/auth/_generated/component.js",
   authGoogle: "@convex-dev/auth/components/google/_generated/component.js",
+  authPassword: "@convex-dev/auth/components/password/_generated/component.js",
+  authUsername: "@convex-dev/auth/components/username/_generated/component.js",
 };
 /** Env vars declared in defineApp({ env }). */
 const ENV_VARS = ["AUTH_GOOGLE_CLIENT_ID", "AUTH_GOOGLE_CLIENT_SECRET"];

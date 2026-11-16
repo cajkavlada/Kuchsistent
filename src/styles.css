@@ -53,3 +53,32 @@ h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
 }
 .tab.active { color: var(--green); font-weight: 700; }
 .tab span:first-child { font-size: 1.3rem; }
+.row { display: flex; gap: .5rem; width: 100%; }
+.test-login {
+  margin-top: 1.5rem; padding: 12px; width: 100%; border: 1px dashed var(--muted);
+  border-radius: 12px; display: flex; flex-direction: column; gap: .5rem;
+}
+.test-login p { margin: 0; }
+h2 { font-size: 1.05rem; margin: 0; }
+.card {
+  background: #fff; border: 1px solid var(--line); border-radius: 16px;
+  padding: 16px; display: flex; flex-direction: column; gap: .75rem;
+}
+.card .link { margin-top: 0; align-self: center; }
+.input {
+  min-height: 48px; border-radius: 12px; border: 1px solid var(--line);
+  padding: 0 14px; font: inherit; font-weight: 400; background: #fff; width: 100%;
+}
+.input.code { text-align: center; font-size: 1.4rem; letter-spacing: .15em; text-transform: uppercase; }
+.members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
+.members li { display: flex; align-items: center; gap: .75rem; }
+.avatar {
+  width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--green); color: #fff; font-weight: 700;
+}
+.invite-code {
+  margin: 0; text-align: center; font-size: 2rem; font-weight: 700;
+  letter-spacing: .12em; font-family: ui-monospace, monospace;
+}
+.invite-link { margin: 0; text-align: center; color: var(--muted); word-break: break-all; }

@@ -42,6 +42,6 @@ Checks: `npm run typecheck`, `npm test`.
 - `CONVEX_DEPLOY_KEY` = a Convex *Preview* deploy key, scoped to the Preview environment.
 - No secrets with the `VITE_` prefix; `VITE_CONVEX_URL` is injected by `convex deploy`.
 
-Each PR then gets a Vercel preview backed by its own fresh Convex preview backend (seeded by `seed:preview`); merging to `main` deploys production.
+Each pushed branch then gets a Vercel preview backed by its own fresh Convex preview backend (seeded by `seed:preview`); merging to `main` deploys production.
 
-Known limitation: Google sign-in on preview deploys can't complete, because each preview backend has its own `*.convex.site` callback URL that isn't registered with Google. Previews show the signed-out app; sign in on production or locally.
+Google sign-in on preview deploys can't complete, because each preview backend has its own `*.convex.site` callback URL that isn't registered with Google. Instead, `seed:preview` turns on a fake "Testovací přihlášení" (Tester A/B/C) on preview backends only; production never has it. Every push to a branch recreates its preview backend (`scripts/vercel-build.sh`), so preview data starts empty each time.

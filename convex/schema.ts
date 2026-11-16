@@ -8,6 +8,8 @@ export default defineSchema({
     email: v.optional(v.string()),
     emailVerified: v.boolean(),
     image: v.optional(v.string()),
+    /** A fake account from the preview-only test sign-in (see testLogin.ts). */
+    testUser: v.optional(v.boolean()),
   }),
 
   /** Core data model (#5). Unnamed; usualShoppingDays arrives with shopping. */
@@ -21,5 +23,27 @@ export default defineSchema({
     household: v.id("households"),
   })
     .index("by_user", ["userId"])
+    .index("by_household", ["household"]),
+
+  /**
+   * One row `{ enabled: true }` turns on the fake test sign-in. Only
+   * `seed:preview` writes it, and that runs only on Vercel preview backends,
+   * so production never has it.
+   */
+  testMode: defineTable({ enabled: v.boolean() }),
+
+  /**
+   * A single-use, 7-day link + short code for joining a Household (#11).
+   * `code` is stored in display form, e.g. "K7M-2QX".
+   */
+  invites: defineTable({
+    household: v.id("households"),
+    code: v.string(),
+    createdBy: v.id("users"),
+    expiresAt: v.number(),
+    usedBy: v.optional(v.id("users")),
+    usedAt: v.optional(v.number()),
+  })
+    .index("by_code", ["code"])
     .index("by_household", ["household"]),
 });

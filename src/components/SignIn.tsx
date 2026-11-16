@@ -4,6 +4,7 @@ import {
   useSignInWithGoogle,
 } from "@convex-dev/auth/methods/google/react";
 import { api } from "@convex/_generated/api";
+import { TestLogin } from "./TestLogin";
 
 const FLOW_ERRORS: Record<string, string> = {
   ACCESS_DENIED: "Přihlášení bylo zrušeno.",
@@ -12,7 +13,7 @@ const FLOW_ERRORS: Record<string, string> = {
   OTHER_ERROR: "Přihlášení se nepodařilo, zkus to znovu.",
 };
 
-export function SignIn() {
+export function SignIn({ invited = false }: { invited?: boolean }) {
   const { signIn } = useSignInWithGoogle(api.auth);
   const { flowError } = useOauth();
   const [busy, setBusy] = useState(false);
@@ -38,11 +39,15 @@ export function SignIn() {
     <main className="center">
       <p className="logo">🍲 Kuchsistent</p>
       <p className="muted">Recepty, plán jídel a nákupní seznam pro celou domácnost.</p>
+      {invited && (
+        <p>Máš pozvánku do domácnosti. Přihlas se a hned tě připojíme.</p>
+      )}
       <button className="btn google" onClick={onClick} disabled={busy}>
         <GoogleLogo />
         {busy ? "Přesměrovávám…" : "Přihlásit se přes Google"}
       </button>
       {message && <p className="error" role="alert">{message}</p>}
+      <TestLogin />
     </main>
   );
 }

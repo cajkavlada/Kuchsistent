@@ -1,20 +1,209 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
+import { useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
+import { invitePath } from "@convex/lib/inviteCode";
+import { APP_TIME_ZONE } from "@convex/lib/dates";
 
 export const Route = createFileRoute("/nastaveni")({ component: Settings });
 
 function Settings() {
-  const household = useQuery(api.households.current);
-  const me = useQuery(api.households.me);
   const { signOut } = useAuthActions();
   return (
     <section className="page">
       <h1>Nastavení</h1>
-      {me && <p>Přihlášen(a) jako {me.user.name ?? me.user.email}</p>}
-      {household && <p className="muted">Výchozí počet porcí: {household.defaultPortions}</p>}
+      <Members />
+      <InviteCard />
+      <DefaultPortions />
       <button className="btn" onClick={() => void signOut()}>Odhlásit se</button>
     </section>
+  );
+}
+
+function Members() {
+  const members = useQuery(api.households.members);
+  return (
+    <div className="card">
+      <h2>Členové</h2>
+      {members === undefined ? (
+        <p className="muted">Načítám…</p>
+      ) : (
+        <ul className="members">
+          {members.map((m) => (
+            <li key={m._id}>
+              <Avatar name={m.name} image={m.image} />
+              <span>
+                {m.name}
+                {m.isMe && <span className="muted"> (ty)</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Avatar({ name, image }: { name: string; image: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (image && !failed) {
+    return (
+      <img
+        className="avatar"
+        src={image}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <span className="avatar" aria-hidden="true">
+      {name.trim().charAt(0).toUpperCase() || "?"}
+    </span>
+  );
+}
+
+const expiryFormat = new Intl.DateTimeFormat("cs-CZ", {
+  timeZone: APP_TIME_ZONE,
+  day: "numeric",
+  month: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function InviteCard() {
+  const create = useMutation(api.invites.create);
+  const [invite, setInvite] = useState<{ code: string; expiresAt: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"link" | "code" | null>(null);
+
+  const link = invite ? window.location.origin + invitePath(invite.code) : "";
+  const canShare = typeof navigator.share === "function";
+
+  async function onCreate() {
+    setBusy(true);
+    setError(null);
+    try {
+      setInvite(await create({}));
+      setCopied(null);
+    } catch {
+      setError("Pozvánku se nepodařilo vytvořit, zkus to znovu.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy(what: "link" | "code") {
+    if (!invite) return;
+    try {
+      await navigator.clipboard.writeText(what === "link" ? link : invite.code);
+      setCopied(what);
+    } catch {
+      setError("Kopírování se nepodařilo, opiš kód ručně.");
+    }
+  }
+
+  async function share() {
+    if (!invite) return;
+    try {
+      await navigator.share({
+        title: "Pozvánka do Kuchsistentu",
+        text: `Připoj se k naší domácnosti v Kuchsistentu. Kód: ${invite.code}`,
+        url: link,
+      });
+    } catch {
+      // Share sheet dismissed.
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Pozvat do domácnosti</h2>
+      {invite === null ? (
+        <>
+          <p className="muted small">
+            Vytvoř pozvánku pro dalšího člena. Platí 7 dní a jde použít jen jednou.
+          </p>
+          <button className="btn primary" onClick={onCreate} disabled={busy}>
+            {busy ? "Vytvářím…" : "Pozvat do domácnosti"}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="invite-code" aria-label="Kód pozvánky">{invite.code}</p>
+          <p className="invite-link small">{link}</p>
+          <p className="muted small">
+            Jednorázová, platí do {expiryFormat.format(invite.expiresAt)}.
+          </p>
+          {canShare && (
+            <button className="btn primary" onClick={share}>Sdílet pozvánku</button>
+          )}
+          <div className="row">
+            <button className="btn" onClick={() => copy("link")}>
+              {copied === "link" ? "Odkaz zkopírován ✓" : "Kopírovat odkaz"}
+            </button>
+            <button className="btn" onClick={() => copy("code")}>
+              {copied === "code" ? "Kód zkopírován ✓" : "Kopírovat kód"}
+            </button>
+          </div>
+          <button className="link" onClick={onCreate} disabled={busy}>
+            Vytvořit novou pozvánku
+          </button>
+        </>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+function DefaultPortions() {
+  const household = useQuery(api.households.current);
+  const setDefaultPortions = useMutation(api.households.setDefaultPortions);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function change(by: number) {
+    if (!household) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await setDefaultPortions({ defaultPortions: household.defaultPortions + by });
+    } catch {
+      setError("Počet porcí se nepodařilo uložit.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Výchozí počet porcí</h2>
+      <p className="muted small">Kolik porcí se předvyplní u nového jídla.</p>
+      {household && (
+        <span className="stepper">
+          <button
+            type="button"
+            aria-label="Méně porcí"
+            disabled={busy || household.defaultPortions <= 1}
+            onClick={() => change(-1)}
+          >
+            −
+          </button>
+          <output aria-live="polite">{household.defaultPortions}</output>
+          <button
+            type="button"
+            aria-label="Více porcí"
+            disabled={busy || household.defaultPortions >= 20}
+            onClick={() => change(1)}
+          >
+            +
+          </button>
+        </span>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
   );
 }
