@@ -17,6 +17,7 @@ export function SignIn() {
   const { flowError } = useOauth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  if (flowError) console.error("Google sign-in failed", flowError);
   const message = error ?? (flowError ? FLOW_ERRORS[flowError.error] : null);
 
   async function onClick() {
@@ -25,6 +26,7 @@ export function SignIn() {
     // Redirect flow (not popup): the browser leaves for Google and comes back.
     const result = await signIn({ redirectTo: window.location.origin + "/" });
     if (result.status !== "redirect") {
+      console.error("Google sign-in failed to start", result);
       setBusy(false);
       setError(FLOW_ERRORS.OTHER_ERROR);
     }
