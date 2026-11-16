@@ -14,7 +14,12 @@ Kuchsistent: Czech household cooking assistant (recipe photos → meal plan → 
    - step-by-step what to test on the phone, using Tester A/B/C (a second tester in an Incognito tab or on another phone);
    - any Convex env vars production will need.
 7. **Iterate.** Apply the user's tweaks and push again. Each push recreates the preview backend, so test data starts over.
-8. **PR only after the user approves the preview.** Rebase and run the checks again, then open the PR (body: what was built, notes for review, "Part of #N" / "Implements #N"). Merge only when the user says so; merging to `main` deploys production. Don't close the issue: the user closes it.
+8. **PR only after the user approves the preview.** Rebase and run the checks again, then open the PR (body: what was built, notes for review, "Part of #N" / "Implements #N"). Merge only when the user says so; merging to `main` deploys production.
+9. **After merging**, in the same turn:
+   - wait for the Vercel status on the merge commit to be `success` (production is live);
+   - close the issue (`state=closed`, `state_reason=completed`) with a comment linking the PR and any notes later tickets need;
+   - delete the merged branch (`gh api -X DELETE repos/cajkavlada/kuchsistent/git/refs/heads/<branch>`);
+   - remind the user to delete the branch's Convex preview deployment in the Convex dashboard (the deployment named `preview/<branch>`). The sandbox can't reach Convex, so this step is the user's. Undeleted previews expire after 5 days anyway.
 
 Branches named `prototype/*` and `research/*` are reference only. Read them, never merge them.
 
