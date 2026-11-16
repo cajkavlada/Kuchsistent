@@ -4,7 +4,8 @@ import { internalMutation } from "./_generated/server";
 /**
  * Runs once on each fresh Convex preview backend (`--preview-run` in
  * vercel.json). Preview backends start empty; later tickets add sample data
- * here (Recipes, a plan) so a PR can be demoed without setup.
+ * here so a PR can be demoed without setup. Sample Recipes need a Household,
+ * so they're added when a tester founds one (`lib/sampleData.ts`).
  */
 export const preview = internalMutation({
   args: {},

@@ -127,4 +127,21 @@ export default defineSchema({
     plenty: v.boolean(),
     neverBuy: v.boolean(),
   }).index("by_household", ["household"]),
+
+  /**
+   * A Planned Meal (#5): a Recipe in a Meal Slot on a Prague day
+   * (`YYYY-MM-DD`). A slot holds 1..n items in `order`. `occasion` is for
+   * Specials only. Points to the live Recipe (no snapshot).
+   */
+  plannedMeals: defineTable({
+    household: v.id("households"),
+    date: v.string(),
+    slot: v.union(v.literal("lunch"), v.literal("dinner"), v.literal("special")),
+    order: v.number(),
+    recipe: v.id("recipes"),
+    portions: v.number(),
+    occasion: v.optional(v.string()),
+  })
+    .index("by_household_date", ["household", "date"])
+    .index("by_household_recipe_date", ["household", "recipe", "date"]),
 });

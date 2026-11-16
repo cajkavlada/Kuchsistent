@@ -1,6 +1,8 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // `@convex/*` and `~/*` from tsconfig, for app tests.
+  resolve: { tsconfigPaths: true },
   test: {
     projects: [
       {

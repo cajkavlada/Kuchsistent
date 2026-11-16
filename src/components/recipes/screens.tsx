@@ -94,8 +94,7 @@ export function Saved({ recipe }: { recipe: RecipeView }) {
           {recipe.lines.length} surovin · {recipe.steps.length} kroků
         </p>
       </div>
-      {/* Planning arrives with the day plan (#23). */}
-      <Link to="/plan" className="btn primary">
+      <Link to="/plan" search={{ naplanovat: recipe._id }} className="btn primary">
         Naplánovat
       </Link>
       <Link to="/recepty/vyfotit" className="btn">
@@ -118,6 +117,9 @@ export function RecipeDetail({ recipe }: { recipe: RecipeView }) {
         {CATEGORY_LABEL[recipe.category]}
         {recipe.baseServings ? ` · ${portionsLabel(recipe.baseServings)}` : ""}
       </p>
+      <Link to="/plan" search={{ naplanovat: recipe._id }} className="btn primary">
+        📅 Naplánovat
+      </Link>
       <h3 className="sec">Suroviny</h3>
       <div className="rcard">
         {recipe.lines.map((l) => (
