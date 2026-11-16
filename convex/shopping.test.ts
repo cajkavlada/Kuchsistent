@@ -7,7 +7,15 @@ import { modules } from "./test.setup";
 import { createHouseholdFor } from "./households";
 import { memberOf, type Member } from "./lib/membership";
 import type { MeasureKind } from "./lib/ingredients";
-import { addFor, removeFor, setPortionsFor } from "./plan";
+import {
+  addFor,
+  addLeftoverFor,
+  removeFor,
+  removeLeftoverFor,
+  setLeftoverPortionsFor,
+  setPortionsFor,
+} from "./plan";
+import { mergeFor } from "./ingredients";
 import { listFor, regenerateShopping, setCheckedFor } from "./shopping";
 
 type T = ReturnType<typeof convexTest>;
@@ -78,7 +86,7 @@ async function meal(
   recipeId: Id<"recipes">,
   date: string,
   portions = 4,
-  slot: "lunch" | "dinner" = "lunch",
+  slot: "lunch" | "dinner" | "special" = "lunch",
 ): Promise<Id<"plannedMeals">> {
   return await t.run((ctx) =>
     ctx.db.insert("plannedMeals", { household: m.household, date, slot, order: 0, recipe: recipeId, portions }),
@@ -204,13 +212,14 @@ describe("regenerateShopping", () => {
     await t.run((ctx) => ctx.db.patch("plannedMeals", id, { portions: 6 }));
     await regen(t, m);
     const items = await allItems(t);
-    expect(items.map((i) => [i.label, i.amount, i.checked])).toEqual(
+    expect(items.map((i) => [i.label, i.amount, i.checked, i.topUp ?? false])).toEqual(
       expect.arrayContaining([
-        ["hovězí", 500, true],
-        ["toaletní papír", undefined, false],
+        ["hovězí", 500, true, false],
+        ["hovězí", 250, false, true],
+        ["toaletní papír", undefined, false, false],
       ]),
     );
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
   });
 
   test("is a no-op when nothing changed", async () => {
@@ -233,6 +242,150 @@ describe("regenerateShopping", () => {
     await meal(t, m, await recipe(t, m, [{ ingredient: salt }]), "2026-11-22");
     await regen(t, m);
     expect((await list(t, m)).trips.map((x) => x.date)).toEqual(["2026-11-16", "2026-11-19", "2026-11-22"]);
+  });
+});
+
+describe("frozen ticks, leftovers and Specials (#28)", () => {
+  async function setup(t: T) {
+    const m = await newMember(t);
+    const beef = await ingredient(t, m, "hovězí");
+    const r = await recipe(t, m, [{ ingredient: beef, amount: 1000, unit: "g" }], 4);
+    return { m, beef, r };
+  }
+  const tick = async (t: T, m: Member, label: string) => {
+    for (const i of await allItems(t)) {
+      if (i.label === label && !i.checked) await t.run((ctx) => setCheckedFor(ctx, m, { itemId: i._id, checked: true }));
+    }
+  };
+  const rows = async (t: T) =>
+    (await allItems(t)).map((i) => ({ amount: i.amount, checked: i.checked, topUp: i.topUp ?? false, note: i.note }));
+
+  test("a risen need adds a top-up for the difference with a green note; ticking it settles", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    const id = await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    await tick(t, m, "hovězí");
+    await t.run((ctx) => setPortionsFor(ctx, m, { mealId: id, portions: 6 }));
+    expect(await rows(t)).toEqual([
+      { amount: 1000, checked: true, topUp: false, note: undefined },
+      { amount: 500, checked: false, topUp: true, note: "navýšení: Guláš na 6 porcí" },
+    ]);
+    // More still: the unticked top-up grows instead of a second one.
+    await t.run((ctx) => setPortionsFor(ctx, m, { mealId: id, portions: 8 }));
+    expect((await rows(t))[1]).toMatchObject({ amount: 1000, note: "navýšení: Guláš na 8 porcí" });
+    // Ticked top-up and original together cover the meal.
+    await tick(t, m, "hovězí");
+    await regen(t, m);
+    expect(await allItems(t)).toHaveLength(2);
+    // Back to 6: the latest purchase says how much is extra.
+    await t.run((ctx) => setPortionsFor(ctx, m, { mealId: id, portions: 6 }));
+    const after = await rows(t);
+    expect(after).toHaveLength(2);
+    expect(after[0].note).toBeUndefined();
+    expect(after[1].note).toBe("už nepotřeba: 500 g");
+  });
+
+  test("a dropped need or a removed meal leaves the checked item with a red note", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    const id = await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    await tick(t, m, "hovězí");
+    await t.run((ctx) => setPortionsFor(ctx, m, { mealId: id, portions: 2 }));
+    expect(await rows(t)).toEqual([{ amount: 1000, checked: true, topUp: false, note: "už nepotřeba: 500 g" }]);
+    await t.run((ctx) => setPortionsFor(ctx, m, { mealId: id, portions: 4 }));
+    expect((await rows(t))[0].note).toBeUndefined();
+    await t.run((ctx) => removeFor(ctx, m, { mealId: id }));
+    expect(await rows(t)).toEqual([{ amount: 1000, checked: true, topUp: false, note: "už nepotřeba" }]);
+  });
+
+  test("an Ingredient removed from the Recipe makes its checked item not needed", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    await tick(t, m, "hovězí");
+    await t.run(async (ctx) => {
+      for (const l of await ctx.db.query("ingredientLines").collect()) await ctx.db.delete("ingredientLines", l._id);
+    });
+    await regen(t, m);
+    expect((await rows(t))[0].note).toBe("už nepotřeba");
+  });
+
+  test("checked items bought for past meals are left alone", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    const id = await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    await tick(t, m, "hovězí");
+    await t.run((ctx) => ctx.db.patch("plannedMeals", id, { portions: 8 }));
+    await regen(t, m, "2026-11-18");
+    expect(await rows(t)).toEqual([{ amount: 1000, checked: true, topUp: false, note: undefined }]);
+  });
+
+  test("Leftover Portions add to the source meal's amount and regenerate on every change", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    const id = await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    const lo = await t.run((ctx) => addLeftoverFor(ctx, m, { mealId: id, date: "2026-11-18", slot: "lunch" }));
+    // Household default is 4 portions: cooked for 8, on the trip before the source meal.
+    let items = await allItems(t);
+    expect(items.map((i) => [i.amount, i.sourceMeals])).toEqual([[2000, [id]]]);
+    await t.run((ctx) => setLeftoverPortionsFor(ctx, m, { leftoverId: lo, portions: 2 }));
+    expect((await allItems(t))[0].amount).toBe(1500);
+    await tick(t, m, "hovězí");
+    await t.run((ctx) => setLeftoverPortionsFor(ctx, m, { leftoverId: lo, portions: 4 }));
+    items = await allItems(t);
+    expect(items.find((i) => i.topUp)).toMatchObject({ amount: 500, note: "navýšení: Guláš na 8 porcí" });
+    await t.run((ctx) => removeLeftoverFor(ctx, m, { leftoverId: lo }));
+    expect((await rows(t)).map((x) => x.note)).toEqual(["už nepotřeba: 500 g"]);
+  });
+
+  test("Specials are assigned like Lunch (not to a Rohlík trip that day)", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("shoppingTrips", { household: m.household, date: "2026-11-16", kind: "store", status: "planned" });
+      await ctx.db.insert("shoppingTrips", { household: m.household, date: "2026-11-18", kind: "rohlik", status: "planned" });
+    });
+    await meal(t, m, r, "2026-11-18", 4, "special");
+    await regen(t, m);
+    const trips = await t.run((ctx) => ctx.db.query("shoppingTrips").collect());
+    const [item] = await allItems(t);
+    expect(trips.find((x) => x._id === item.trip)!.date).toBe("2026-11-16");
+  });
+
+  test("unchecked items on a past trip move on if their meal is ahead, and are dropped if not", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    const onion = await ingredient(t, m, "cibule", { measureKind: "count" });
+    const r2 = await recipe(t, m, [{ ingredient: onion, amount: 1 }], 4);
+    await meal(t, m, r2, "2026-11-16");
+    await meal(t, m, r, "2026-11-19");
+    await regen(t, m, "2026-11-16");
+    expect((await allItems(t)).map((i) => i.label).sort()).toEqual(["cibule", "hovězí"]);
+    // Two days later, nothing bought: the onion's meal is past, the beef moves to the trip on 18.
+    await regen(t, m, "2026-11-18");
+    const items = await allItems(t);
+    expect(items.map((i) => i.label)).toEqual(["hovězí"]);
+    const trip = await t.run((ctx) => ctx.db.get("shoppingTrips", items[0].trip));
+    expect(trip!.date).toBe("2026-11-18");
+  });
+
+  test("merging Ingredients carries checked items along", async () => {
+    const t = convexTest(schema, modules);
+    const { m, beef, r } = await setup(t);
+    const beef2 = await ingredient(t, m, "hovězí maso");
+    await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    await tick(t, m, "hovězí");
+    await t.run((ctx) => mergeFor(ctx, m, { from: beef, into: beef2 }));
+    const items = await allItems(t);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ ingredient: beef2, checked: true });
+    expect(items[0].note).toBeUndefined();
   });
 });
 

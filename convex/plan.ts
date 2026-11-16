@@ -311,7 +311,7 @@ export async function addLeftoverFor(
     (l) => l.date === date && l.slot === slot,
   );
   if (existing) return existing._id;
-  return await ctx.db.insert("leftoverPortions", {
+  const id = await ctx.db.insert("leftoverPortions", {
     household: member.household,
     sourceMeal: mealId,
     date,
@@ -319,6 +319,9 @@ export async function addLeftoverFor(
     order: await nextOrder(ctx, member.household, date, slot),
     portions: await defaultPortionsOf(ctx, member),
   });
+  // Leftover Portions are cooked with their source meal, so they're bought with it (#28).
+  await regenerateShopping(ctx, member.household);
+  return id;
 }
 
 /** A Leftover Portion's own Portions stepper. */
@@ -336,6 +339,7 @@ export async function setLeftoverPortionsFor(
   await loadLeftover(ctx, member, leftoverId);
   validatePortions(portions);
   await ctx.db.patch("leftoverPortions", leftoverId, { portions });
+  await regenerateShopping(ctx, member.household);
   return null;
 }
 
@@ -356,5 +360,6 @@ export async function removeLeftoverFor(
   if (leftover === null) return null;
   assertSameHousehold(member, leftover);
   await ctx.db.delete("leftoverPortions", leftoverId);
+  await regenerateShopping(ctx, member.household);
   return null;
 }

@@ -1,5 +1,5 @@
 import { STORE_SECTIONS, type StoreSection } from "@convex/lib/ingredients";
-import { formatParts, type Part } from "@convex/lib/shopping";
+import { formatParts, NOT_NEEDED, type Part } from "@convex/lib/shopping";
 
 /** What the list needs of a Shopping Item. */
 export type ListItem = {
@@ -11,10 +11,21 @@ export type ListItem = {
   storeSection: StoreSection;
 };
 
-/** The amount column: "1,2 kg", "500 g + 1 hrnek", or "—" when vague. */
-export function itemAmount(i: Pick<ListItem, "amount" | "unit" | "moreAmounts">): string {
+/**
+ * The amount column: "1,2 kg", "500 g + 1 hrnek", or "—" when vague; a
+ * top-up shows what it adds: "+500 g".
+ */
+export function itemAmount(
+  i: Pick<ListItem, "amount" | "unit" | "moreAmounts"> & { topUp?: boolean },
+): string {
   if (i.amount === undefined || i.unit === undefined) return "—";
-  return formatParts([{ amount: i.amount, unit: i.unit }, ...(i.moreAmounts ?? [])]);
+  const parts = [{ amount: i.amount, unit: i.unit }, ...(i.moreAmounts ?? [])];
+  return i.topUp ? parts.map((p) => `+${formatParts([p])}`).join(" ") : formatParts(parts);
+}
+
+/** How a regeneration note shows (#10): red "už nepotřeba", otherwise green. */
+export function noteTone(note: string): "gone" | "delta" {
+  return note.startsWith(NOT_NEEDED) ? "gone" : "delta";
 }
 
 /**

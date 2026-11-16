@@ -166,6 +166,14 @@ export async function mergeFor(
   for (const line of await linesOfIngredient(ctx, from)) {
     await ctx.db.patch("ingredientLines", line._id, { ingredient: into });
   }
+  // Shopping Items follow too, so ticked ones keep covering their meals (#28).
+  const items = await ctx.db
+    .query("shoppingItems")
+    .withIndex("by_household", (q) => q.eq("household", member.household))
+    .collect();
+  for (const item of items) {
+    if (item.ingredient === from) await ctx.db.patch("shoppingItems", item._id, { ingredient: into });
+  }
   await ctx.db.delete("ingredients", from);
   await regenerateShopping(ctx, member.household);
   return null;

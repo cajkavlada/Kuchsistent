@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { groupBySection, itemAmount, progress, type ListItem } from "./shopping";
+import { groupBySection, itemAmount, noteTone, progress, type ListItem } from "./shopping";
 
 const item = (label: string, storeSection: ListItem["storeSection"], checked = false): ListItem => ({
   label,
@@ -36,4 +36,13 @@ test("progress", () => {
     total: 3,
     left: 2,
   });
+});
+
+test("top-ups show what they add; notes get their tone", () => {
+  expect(itemAmount({ amount: 500, unit: "g", topUp: true })).toBe("+500 g");
+  expect(itemAmount({ amount: 500, unit: "g", moreAmounts: [{ amount: 1, unit: "ks" }], topUp: true })).toBe(
+    "+500 g +1 ks",
+  );
+  expect(noteTone("už nepotřeba: 500 g")).toBe("gone");
+  expect(noteTone("navýšení: Guláš na 6 porcí")).toBe("delta");
 });
