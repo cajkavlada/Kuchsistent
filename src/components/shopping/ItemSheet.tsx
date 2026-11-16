@@ -5,6 +5,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { daysLabel, freshnessLabel, sectionLabel } from "@convex/lib/ingredients";
 import { Sheet } from "~/components/recipes/ui";
 import { dayLabel, SLOT_LABEL } from "~/lib/plan";
+import { rohlikSearchUrl } from "~/lib/rohlik";
 import {
   errorCode,
   freshExplanation,
@@ -18,7 +19,7 @@ import {
  * The item sheet (#10, #29), opened by tapping an item's name: amount, Store
  * Section, Freshness Class and trip; why it's flagged; "Proč to kupuju" (the
  * Planned Meals behind it); "Nakoupit při nákupu" trip chips to move it
- * (#30); the Plenty toggle; and "Smazat" for a Manual Shopping Item or an
+ * (#30); "🔎 Hledat na Rohlíku" on a Rohlík trip (#31); the Plenty toggle; and "Smazat" for a Manual Shopping Item or an
  * item no meal needs any more.
  */
 export function ItemSheet({
@@ -162,6 +163,12 @@ export function ItemSheet({
             </p>
           )}
         </div>
+      )}
+
+      {item.trip.kind === "rohlik" && (
+        <a className="btn rl" href={rohlikSearchUrl(item.label)} target="_blank" rel="noopener noreferrer">
+          🔎 Hledat na Rohlíku
+        </a>
       )}
 
       {ing && (
