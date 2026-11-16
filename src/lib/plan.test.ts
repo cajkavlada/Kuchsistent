@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { dayLabel, searchKey, stripDays } from "./plan";
+import { cookTotal, dayLabel, porce, searchKey, slotShort, stripDays } from "./plan";
 
 describe("dayLabel", () => {
   test("Czech weekday and date", () => {
@@ -35,4 +35,20 @@ describe("stripDays", () => {
 test("searchKey ignores case and diacritics", () => {
   expect(searchKey(" Svíčková ")).toBe("svickova");
   expect(searchKey("ČOČKA")).toBe("cocka");
+});
+
+describe("leftover helpers", () => {
+  test("slotShort", () => {
+    expect(slotShort("2026-11-18", "dinner")).toBe("St večeře");
+    expect(slotShort("2026-11-19", "lunch")).toBe("Čt oběd");
+  });
+  test("cookTotal adds the Leftover Portions", () => {
+    expect(cookTotal(4, [])).toBe(4);
+    expect(cookTotal(4, [{ portions: 2 }, { portions: 4 }])).toBe(10);
+  });
+  test("porce plural", () => {
+    expect(porce(1)).toBe("1 porce");
+    expect(porce(4)).toBe("4 porce");
+    expect(porce(8)).toBe("8 porcí");
+  });
 });

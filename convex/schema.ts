@@ -170,4 +170,20 @@ export default defineSchema({
   })
     .index("by_household_date", ["household", "date"])
     .index("by_household_recipe_date", ["household", "recipe", "date"]),
+
+  /**
+   * A Leftover Portion (#5, #24): a later Lunch/Dinner covered by cooking
+   * `sourceMeal` (a Lunch/Dinner Planned Meal) bigger. Shares `order` with the
+   * Planned Meals of its Meal Slot. Deleted with its source meal.
+   */
+  leftoverPortions: defineTable({
+    household: v.id("households"),
+    sourceMeal: v.id("plannedMeals"),
+    date: v.string(),
+    slot: v.union(v.literal("lunch"), v.literal("dinner")),
+    order: v.number(),
+    portions: v.number(),
+  })
+    .index("by_household_date", ["household", "date"])
+    .index("by_source", ["sourceMeal", "date"]),
 });

@@ -1,11 +1,31 @@
 import { addDays, daysBetween, weekday, type CalendarDay } from "@convex/lib/dates";
+import { MAIN_SLOTS, type MainSlot, type MealSlot } from "@convex/lib/slots";
 
 /** Czech weekday abbreviations, by ISO weekday (1 = Monday). */
 const WEEKDAY_SHORT = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
 
-export const SLOT_LABEL = { lunch: "Oběd", dinner: "Večeře" } as const;
-export type Slot = keyof typeof SLOT_LABEL;
-export const SLOTS: Slot[] = ["lunch", "dinner"];
+export const SLOT_LABEL = { lunch: "Oběd", dinner: "Večeře", special: "Speciál" } as const;
+/** Any Meal Slot. */
+export type Slot = MealSlot;
+/** The Oběd and Večeře sections, in day order. */
+export const SLOTS: MainSlot[] = MAIN_SLOTS;
+/** The picker's Oběd / Večeře / Speciál segmented control. */
+export const PICKER_SLOTS: Slot[] = ["lunch", "dinner", "special"];
+
+/** Slot in a chip or a leftover line: "St večeře". */
+export function slotShort(day: CalendarDay, slot: MainSlot): string {
+  return `${weekdayShort(day)} ${slot === "lunch" ? "oběd" : "večeře"}`;
+}
+
+/** What a meal cooks: its own Portions plus all its Leftover Portions' (#5). */
+export function cookTotal(portions: number, leftovers: { portions: number }[]): number {
+  return leftovers.reduce((sum, l) => sum + l.portions, portions);
+}
+
+/** "porce" with the right Czech plural: 1 porce, 2–4 porce, 5 porcí. */
+export function porce(n: number): string {
+  return `${n} ${n >= 5 || n === 0 ? "porcí" : "porce"}`;
+}
 
 export const MIN_PORTIONS = 1;
 export const MAX_PORTIONS = 20;
