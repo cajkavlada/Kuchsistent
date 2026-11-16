@@ -10,13 +10,16 @@
   
   import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
   import type * as auth from "../auth.js";
+import type * as extractNode from "../extractNode.js";
 import type * as households from "../households.js";
 import type * as invites from "../invites.js";
 import type * as lib_config from "../lib/config.js";
 import type * as lib_dates from "../lib/dates.js";
+import type * as lib_extraction from "../lib/extraction.js";
 import type * as lib_inviteCode from "../lib/inviteCode.js";
 import type * as lib_membership from "../lib/membership.js";
 import type * as lib_testMode from "../lib/testMode.js";
+import type * as recipes from "../recipes.js";
 import type * as seed from "../seed.js";
 import type * as testLogin from "../testLogin.js";
 import type * as users from "../users.js";
@@ -31,13 +34,16 @@ import type * as users from "../users.js";
    */
   declare const fullApi: ApiFromModules<{
     "auth": typeof auth,
+"extractNode": typeof extractNode,
 "households": typeof households,
 "invites": typeof invites,
 "lib/config": typeof lib_config,
 "lib/dates": typeof lib_dates,
+"lib/extraction": typeof lib_extraction,
 "lib/inviteCode": typeof lib_inviteCode,
 "lib/membership": typeof lib_membership,
 "lib/testMode": typeof lib_testMode,
+"recipes": typeof recipes,
 "seed": typeof seed,
 "testLogin": typeof testLogin,
 "users": typeof users,

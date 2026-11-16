@@ -46,4 +46,52 @@ export default defineSchema({
   })
     .index("by_code", ["code"])
     .index("by_household", ["household"]),
+
+  /**
+   * A Recipe (#5). Starts as a Draft Recipe while the AI reads its photos
+   * (`extraction`) and the user reviews it; becomes `confirmed` on save.
+   */
+  recipes: defineTable({
+    household: v.id("households"),
+    name: v.string(),
+    category: v.union(v.literal("main"), v.literal("special")),
+    status: v.union(v.literal("draft"), v.literal("confirmed")),
+    archived: v.boolean(),
+    /** Servings the book's amounts are for; unset when the book gives none. */
+    baseServings: v.optional(v.number()),
+    steps: v.array(v.string()),
+    notes: v.optional(v.string()),
+    source: v.optional(v.object({ book: v.string(), page: v.string() })),
+    extraction: v.optional(
+      v.object({
+        state: v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
+        /** Model that produced the draft, e.g. `claude-sonnet-5-5`. */
+        model: v.optional(v.string()),
+        error: v.optional(v.string()),
+        /** When this reading run was scheduled; identifies the run. */
+        startedAt: v.number(),
+      }),
+    ),
+  }).index("by_household_status", ["household", "status"]),
+
+  /** A Recipe Photo: the resized JPEG of a cookbook page, kept with the Recipe. */
+  recipePhotos: defineTable({
+    recipe: v.id("recipes"),
+    storageId: v.id("_storage"),
+    order: v.number(),
+  })
+    .index("by_recipe", ["recipe", "order"])
+    .index("by_storage", ["storageId"]),
+
+  /**
+   * An Ingredient Line as printed (`raw`), plus the parsed amount and unit
+   * (kept as written, e.g. `dkg`). Mapping to an Ingredient comes later (#19).
+   */
+  ingredientLines: defineTable({
+    recipe: v.id("recipes"),
+    order: v.number(),
+    raw: v.string(),
+    amount: v.optional(v.number()),
+    unit: v.optional(v.string()),
+  }).index("by_recipe", ["recipe", "order"]),
 });

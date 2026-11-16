@@ -31,6 +31,31 @@ export function householdCreatorEmails(
   );
 }
 
+/**
+ * `EXTRACTION_MODELS`: comma-separated models that read Recipe photos, tried
+ * in order (#2). `claude-*` models use `ANTHROPIC_API_KEY`, `gemini-*` models
+ * use `GEMINI_API_KEY`. Unknown vendors are skipped.
+ */
+export const DEFAULT_EXTRACTION_MODELS = ["claude-sonnet-5-5", "gemini-3.8-flash"];
+
+export type ExtractionVendor = "anthropic" | "google";
+
+export function extractionVendor(model: string): ExtractionVendor | null {
+  if (model.startsWith("claude-")) return "anthropic";
+  if (model.startsWith("gemini-")) return "google";
+  return null;
+}
+
+export function extractionModels(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const models = (env.EXTRACTION_MODELS ?? "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => m && extractionVendor(m) !== null);
+  return models.length ? [...new Set(models)] : DEFAULT_EXTRACTION_MODELS;
+}
+
 export function mayCreateHousehold(
   email: string | undefined,
   emailVerified: boolean,
