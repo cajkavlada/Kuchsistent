@@ -527,3 +527,19 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .chip.rl.on { background: #7c3aed; border-color: #7c3aed; }
 .chip:disabled { opacity: .45; }
 .why.gone p { margin: 0 0 8px; }
+
+/* Rohlík hand-off (#31) */
+.handoff { background: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.handoff-title { margin: 0; }
+.handoff-btns { display: flex; gap: 6px; }
+.handoff-btns .btn { flex: 1; min-width: 0; padding-left: 8px; padding-right: 8px; }
+.handoff .muted.small { margin: 0; }
+.btn.rl { background: #7c3aed; border-color: #7c3aed; color: #fff; text-align: center; text-decoration: none; }
+.btn.rl:disabled { opacity: .45; }
+.srow .rlink {
+  flex: none; min-height: 36px; display: flex; align-items: center; padding: 0 9px; margin-left: 4px;
+  border-radius: 999px; background: #f3e8ff; color: #7c3aed; font-size: .75rem; font-weight: 600;
+  text-decoration: none; white-space: nowrap;
+}
+.ai-steps { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 6px; font-size: .92rem; }
+.ai-prompt { width: 100%; min-height: 220px; font-size: .82rem; line-height: 1.4; resize: vertical; }

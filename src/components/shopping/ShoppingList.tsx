@@ -16,7 +16,9 @@ import {
   shoppingError,
   splitPlenty,
 } from "~/lib/shopping";
+import { rohlikSearchUrl } from "~/lib/rohlik";
 import { ItemSheet } from "./ItemSheet";
+import { RohlikCard } from "./RohlikCard";
 import { AddTripSheet, TripMenuSheet } from "./TripSheets";
 
 type List = FunctionReturnType<typeof api.shopping.list>;
@@ -32,7 +34,9 @@ const FLASH_MS = 1600;
  * box at the bottom (#29). The trip's "⋯" menu switches, moves, deletes and
  * closes it; the field on top adds Manual Shopping Items (#30). Ticks are
  * optimistic and live for both Members. Tapping the circle ticks; tapping
- * the name opens the item sheet.
+ * the name opens the item sheet. A Rohlík trip gets the hand-off card and a
+ * "🔎 Rohlík" search link on each unticked row (#31); there a tick means
+ * "in the cart".
  */
 export function ShoppingList() {
   const data = useQuery(api.shopping.list, {});
@@ -231,6 +235,7 @@ function TripView({
   const p = progress(list);
   const warnings = freshCount(list);
   const groups = groupBySection(list);
+  const rohlik = trip.kind === "rohlik";
   return (
     <>
       <div className="trip-head">
@@ -254,6 +259,7 @@ function TripView({
         {trip.status === "done" && " · nákup hotový"}
       </p>
       {trip.status === "planned" && trip.date >= today && <AddItem key={trip._id} tripId={trip._id} />}
+      {rohlik && trip.status === "planned" && <RohlikCard date={trip.date} items={trip.items} />}
       {groups.length === 0 && plenty.length === 0 && (
         <p className="muted">Na tenhle nákup zatím nic není.</p>
       )}
@@ -282,6 +288,17 @@ function TripView({
                     <Badges item={i} />
                   </button>
                   <span className={`amt${i.amount === undefined ? " none" : ""}`}>{itemAmount(i)}</span>
+                  {rohlik && !i.checked && (
+                    <a
+                      className="rlink"
+                      href={rohlikSearchUrl(i.label)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Hledat ${i.label} na Rohlíku`}
+                    >
+                      🔎 Rohlík
+                    </a>
+                  )}
                 </div>
               </li>
             ))}
