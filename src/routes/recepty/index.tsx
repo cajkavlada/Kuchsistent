@@ -1,8 +1,10 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "convex/react";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery } from "convex/react";
+import { useState } from "react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
-import { CATEGORY_LABEL, portionsLabel } from "~/lib/format";
+import { CATEGORY_LABEL, errorMessage, portionsLabel } from "~/lib/format";
+import { useOnline } from "~/pwa";
 
 export const Route = createFileRoute("/recepty/")({
   component: Library,
@@ -13,12 +15,36 @@ type Item = FunctionReturnType<typeof api.recipes.library>["recipes"][number];
 /** Recepty: drafts in progress, then confirmed Recipes as a simple list (shelves come with #25). */
 function Library() {
   const library = useQuery(api.recipes.library);
+  const createManual = useMutation(api.recipes.createManual);
+  const navigate = useNavigate();
+  const online = useOnline();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function manual() {
+    setBusy(true);
+    setError(null);
+    try {
+      const recipeId = await createManual();
+      await navigate({ to: "/recepty/$recipeId", params: { recipeId } });
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="page">
       <h1>Recepty</h1>
-      <Link to="/recepty/vyfotit" className="btn primary">
-        📷 Vyfotit recept
-      </Link>
+      <div className="frow">
+        <Link to="/recepty/vyfotit" className="btn primary grow">
+          📷 Vyfotit recept
+        </Link>
+        <button className="btn" onClick={manual} disabled={busy || !online}>
+          ✎ Ručně
+        </button>
+      </div>
+      {error && <p className="error" role="alert">{error}</p>}
 
       {library === undefined ? (
         <p className="muted">Načítám…</p>
@@ -29,7 +55,7 @@ function Library() {
               <h3 className="sec">Rozpracované</h3>
               <ul className="rlist">
                 {library.drafts.map((r) => (
-                  <RecipeRow key={r._id} r={r} sub={<DraftState state={r.extractionState} />} />
+                  <RecipeRow key={r._id} r={r} sub={<DraftState r={r} />} />
                 ))}
               </ul>
             </>
@@ -72,7 +98,8 @@ function RecipeRow({ r, sub }: { r: Item; sub: React.ReactNode }) {
   );
 }
 
-function DraftState({ state }: { state: Item["extractionState"] }) {
+function DraftState({ r }: { r: Item }) {
+  const state = r.extractionState;
   if (state === "pending")
     return (
       <>
@@ -80,5 +107,7 @@ function DraftState({ state }: { state: Item["extractionState"] }) {
       </>
     );
   if (state === "failed") return <span className="warn-text">Nepodařilo se přečíst</span>;
+  if (r.choosing) return <span className="warn-text">Na fotce je víc receptů – vyber</span>;
+  if (state === null && !r.photoUrl) return <>Ruční zápis</>;
   return <>Čeká na kontrolu</>;
 }

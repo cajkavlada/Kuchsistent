@@ -326,3 +326,10 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .pthumb { position: relative; }
 .pcount { position: absolute; left: 2px; right: 2px; bottom: 2px; background: rgba(0, 0, 0, .7); color: #fff; font-size: .62rem; font-weight: 700; border-radius: 4px; text-align: center; }
 .pcount.big { left: 6px; right: auto; top: 6px; bottom: auto; z-index: 2; border: 0; padding: 6px 10px; font-size: .8rem; border-radius: 8px; font-family: inherit; }
+
+/* several recipes on one photo (#21) */
+.spread-pick { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font: inherit; color: var(--fg); }
+.spread-pick .grow { display: flex; flex-direction: column; gap: 2px; }
+.spread-pick.on { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.spread-pick.on .chip { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+.spread-pick:not(.on) b { color: var(--muted); text-decoration: line-through; }

@@ -2,10 +2,12 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
-import { CATEGORY_LABEL, errorMessage, portionsLabel } from "~/lib/format";
+import type { Id } from "@convex/_generated/dataModel";
+import { CATEGORY_LABEL, errorMessage, portionsLabel, recipesLabel } from "~/lib/format";
+import { useOnline } from "~/pwa";
 import { lineIngredientName } from "./Ingredients";
 import { amountUnit, type RecipeView } from "./Review";
-import { PhotoPane, ScanView, TopBar } from "./ui";
+import { PAGE_SIDE, PhotoPane, ScanView, TopBar } from "./ui";
 
 /** The AI is reading the photos; the action finishes even if the app is closed. */
 export function Reading({ recipe }: { recipe: RecipeView }) {
@@ -21,12 +23,17 @@ export function Reading({ recipe }: { recipe: RecipeView }) {
         Obvykle 5–20 s. Když aplikaci zavřeš, čtení doběhne a koncept najdeš
         v knihovně v Rozpracovaných.
       </p>
-      {recipe.extraction?.stale && <RetryButtons recipe={recipe} />}
+      {recipe.extraction?.stale && (
+        <>
+          <p className="banner warn">Čtení trvá nezvykle dlouho, nejspíš se ztratilo.</p>
+          <FailureActions recipe={recipe} />
+        </>
+      )}
     </section>
   );
 }
 
-/** Reading failed (the full set of ways out comes with #21). */
+/** Reading failed: try again, retake, fill in by hand keeping the photo, or discard (#21). */
 export function ReadingFailed({ recipe }: { recipe: RecipeView }) {
   return (
     <section className="page">
@@ -39,15 +46,12 @@ export function ReadingFailed({ recipe }: { recipe: RecipeView }) {
         </details>
       )}
       <PhotoPane photos={recipe.photos} />
-      <RetryButtons recipe={recipe} />
+      <FailureActions recipe={recipe} />
     </section>
   );
 }
 
-function RetryButtons({ recipe }: { recipe: RecipeView }) {
-  const retry = useMutation(api.recipes.retryExtraction);
-  const discard = useMutation(api.recipes.discard);
-  const navigate = useNavigate();
+function useAct() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function act(fn: () => Promise<unknown>) {
@@ -61,14 +65,42 @@ function RetryButtons({ recipe }: { recipe: RecipeView }) {
       setBusy(false);
     }
   }
+  return { busy, error, act };
+}
+
+function FailureActions({ recipe }: { recipe: RecipeView }) {
+  const retry = useMutation(api.recipes.retryExtraction);
+  const fillManually = useMutation(api.recipes.fillManually);
+  const discard = useMutation(api.recipes.discard);
+  const navigate = useNavigate();
+  const online = useOnline();
+  const { busy, error, act } = useAct();
+  const off = busy || !online;
   return (
     <div className="stack">
-      <button className="btn primary" disabled={busy} onClick={() => act(() => retry({ recipeId: recipe._id }))}>
+      {!online && <NeedsInternet />}
+      <button className="btn primary" disabled={off} onClick={() => act(() => retry({ recipeId: recipe._id }))}>
         Zkusit znovu
       </button>
       <button
+        className="btn"
+        disabled={off}
+        onClick={() =>
+          act(async () => {
+            // The old photo goes; the camera opens for a new one.
+            await discard({ recipeId: recipe._id });
+            await navigate({ to: "/recepty/vyfotit", replace: true });
+          })
+        }
+      >
+        Vyfotit znovu
+      </button>
+      <button className="btn ghost" disabled={off} onClick={() => act(() => fillManually({ recipeId: recipe._id }))}>
+        Vyplnit ručně (fotka zůstane u receptu)
+      </button>
+      <button
         className="btn danger"
-        disabled={busy}
+        disabled={off}
         onClick={() =>
           act(async () => {
             await discard({ recipeId: recipe._id });
@@ -83,8 +115,100 @@ function RetryButtons({ recipe }: { recipe: RecipeView }) {
   );
 }
 
+/** Recipe capture needs the server to read the photo (#13). */
+export function NeedsInternet() {
+  return (
+    <p className="banner warn" role="status">
+      Bez připojení. Přečíst recept z fotky jde jen s internetem.
+    </p>
+  );
+}
+
+/**
+ * "Na fotce je víc receptů" (#21): the AI found several recipes on the photo.
+ * The user picks which to keep; each becomes its own draft sharing the photo,
+ * reviewed one after another.
+ */
+export function ChooseFromPhoto({ recipe }: { recipe: RecipeView }) {
+  const choose = useMutation(api.recipes.chooseFromPhoto);
+  const navigate = useNavigate();
+  const online = useOnline();
+  const drafts = recipe.spread?.drafts ?? [];
+  const [skip, setSkip] = useState<Set<string>>(new Set());
+  const { busy, error, act } = useAct();
+  const keep = drafts.filter((d) => !skip.has(d._id)).map((d) => d._id as Id<"recipes">);
+  const toggle = (id: string) =>
+    setSkip((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  return (
+    <section className="page with-bar">
+      <TopBar title="Na fotce je víc receptů" />
+      <PhotoPane photos={recipe.photos} />
+      <p>
+        Na fotce jsou <b>{recipesLabel(drafts.length)}</b>. Každý se uloží zvlášť, fotka zůstane
+        u všech. Vyber, které chceš.
+      </p>
+      <div className="stack">
+        {drafts.map((d) => {
+          const wanted = !skip.has(d._id);
+          const side = d.pageSide ? PAGE_SIDE[d.pageSide] : undefined;
+          return (
+            <button
+              key={d._id}
+              type="button"
+              className={`spread-pick${wanted ? " on" : ""}`}
+              aria-pressed={wanted}
+              onClick={() => toggle(d._id)}
+            >
+              <span className="grow">
+                <b>{d.name || "Recept bez názvu"}</b>
+                <span className="muted small">
+                  {[side, d.extractionState === "pending" ? "čte se…" : `${d.lineCount} surovin`]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+              <span className="chip">{wanted ? "✓ Chci" : "Nechci"}</span>
+            </button>
+          );
+        })}
+      </div>
+      {!online && <NeedsInternet />}
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="bottombar">
+        <button
+          className={`btn grow ${keep.length ? "primary" : "danger"}`}
+          disabled={busy || !online}
+          onClick={() =>
+            act(async () => {
+              const first = await choose({ recipeId: recipe._id, keep });
+              if (first) await navigate({ to: "/recepty/$recipeId", params: { recipeId: first }, replace: true });
+              else await navigate({ to: "/recepty", replace: true });
+            })
+          }
+        >
+          {keep.length === 0
+            ? "Nechci žádný – zahodit"
+            : keep.length === 1
+              ? "Zkontrolovat vybraný ›"
+              : `Zkontrolovat vybrané (${keep.length}) ›`}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 /** After "Uložit recept". */
 export function Saved({ recipe }: { recipe: RecipeView }) {
+  // Another draft from the same photo, ready to review.
+  const next = recipe.spread?.drafts.find(
+    (d) => d._id !== recipe._id && !d.choosing && d.extractionState === "done",
+  );
   return (
     <section className="page">
       <TopBar title="Uloženo" />
@@ -95,7 +219,12 @@ export function Saved({ recipe }: { recipe: RecipeView }) {
           {recipe.lines.length} surovin · {recipe.steps.length} kroků
         </p>
       </div>
-      <Link to="/plan" search={{ naplanovat: recipe._id }} className="btn primary">
+      {next && (
+        <Link to="/recepty/$recipeId" params={{ recipeId: next._id }} replace className="btn primary">
+          Další z fotky: {next.name || "recept bez názvu"} ›
+        </Link>
+      )}
+      <Link to="/plan" search={{ naplanovat: recipe._id }} className={`btn${next ? "" : " primary"}`}>
         Naplánovat
       </Link>
       <Link to="/recepty/vyfotit" className="btn">

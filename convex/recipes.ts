@@ -31,6 +31,11 @@ import { assertSameHousehold, requireMember, type Member } from "./lib/membershi
  * created on save. Before saving, the check queue (#20, `lib/checks.ts`)
  * must be empty: "Recept pokračuje" (add pages and read again), "Pro kolik
  * osob?", "Nejisté čtení" and "Řádek bez suroviny".
+ *
+ * Edge flows (#21): a failed reading can be retried, retaken, filled in by
+ * hand (the photo stays) or discarded; "✎ Ručně" starts a draft with no
+ * photo; a photo holding several recipes becomes one draft per recipe,
+ * sharing the photo, after the user picks which to keep.
  */
 
 const MAX_NAME = 200;
@@ -39,6 +44,8 @@ const MAX_UNIT = 30;
 const MAX_STEP = 5000;
 const MAX_STEPS = 100;
 const MAX_LINES = 200;
+/** Most recipes taken from one photo (a spread usually holds two). */
+export const MAX_SPREAD = 6;
 /** A reading run older than this counts as lost and may be retried. */
 export const STALE_EXTRACTION_MS = 15 * 60 * 1000;
 
@@ -68,6 +75,15 @@ const vReadLine = v.object({
   name: v.optional(v.string()),
   optional: v.optional(v.boolean()),
   uncertain: v.optional(v.boolean()),
+});
+/** One recipe as read by the AI; `pageSide` says where it sits on the photo. */
+const vReadDraft = v.object({
+  name: v.string(),
+  baseServings: v.optional(v.number()),
+  steps: v.array(v.string()),
+  lines: v.array(vReadLine),
+  continuesOffPage: v.optional(v.boolean()),
+  pageSide: v.optional(v.string()),
 });
 const vLineToMatch = v.object({ name: v.string(), unit: v.optional(v.string()), raw: v.string() });
 const vMatchResult = v.object({
@@ -223,6 +239,21 @@ async function replaceLines(
   }
 }
 
+/**
+ * Deletes a draft's photo rows, and each file unless another draft from the
+ * same spread still shows it.
+ */
+async function deletePhotos(ctx: MutationCtx, recipeId: Id<"recipes">) {
+  for (const photo of await photosOf(ctx, recipeId)) {
+    await ctx.db.delete("recipePhotos", photo._id);
+    const other = await ctx.db
+      .query("recipePhotos")
+      .withIndex("by_storage", (q) => q.eq("storageId", photo.storageId))
+      .first();
+    if (other === null) await ctx.storage.delete(photo.storageId);
+  }
+}
+
 async function scheduleExtraction(ctx: MutationCtx, recipeId: Id<"recipes">) {
   const startedAt = Date.now();
   await ctx.db.patch("recipes", recipeId, {
@@ -327,6 +358,56 @@ export async function addPagesFor(
   return null;
 }
 
+/** "✎ Ručně": an empty draft with no photo, filled in on the summary. */
+export const createManual = mutation({
+  args: {},
+  returns: v.id("recipes"),
+  handler: async (ctx) => createManualFor(ctx, await requireMember(ctx)),
+});
+
+export async function createManualFor(ctx: MutationCtx, member: Member): Promise<Id<"recipes">> {
+  return await ctx.db.insert("recipes", {
+    household: member.household,
+    name: "",
+    category: "main",
+    status: "draft",
+    archived: false,
+    steps: [],
+  });
+}
+
+/** A reading run that failed, or has been pending so long it counts as lost. */
+function readingStuck(recipe: Doc<"recipes">): boolean {
+  const e = recipe.extraction;
+  return (
+    e?.state === "failed" ||
+    (e?.state === "pending" && Date.now() - e.startedAt > STALE_EXTRACTION_MS)
+  );
+}
+
+/**
+ * "Vyplnit ručně (fotka zůstane u receptu)": stop waiting for the AI and open
+ * the summary to fill in by hand. A late result of the lost run is dropped.
+ */
+export const fillManually = mutation({
+  args: { recipeId: v.id("recipes") },
+  returns: v.null(),
+  handler: async (ctx, args) => fillManuallyFor(ctx, await requireMember(ctx), args),
+});
+
+export async function fillManuallyFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId }: { recipeId: Id<"recipes"> },
+): Promise<null> {
+  const recipe = await loadRecipe(ctx, member, recipeId);
+  if (recipe.status !== "draft" || !readingStuck(recipe)) {
+    throw new ConvexError({ code: "CANNOT_RETRY" });
+  }
+  await ctx.db.patch("recipes", recipeId, { extraction: undefined });
+  return null;
+}
+
 /** Read the photos again after a failed (or lost) reading run. */
 export const retryExtraction = mutation({
   args: { recipeId: v.id("recipes") },
@@ -340,9 +421,7 @@ export async function retryExtractionFor(
   { recipeId }: { recipeId: Id<"recipes"> },
 ): Promise<null> {
   const recipe = await loadRecipe(ctx, member, recipeId);
-  const e = recipe.extraction;
-  const lost = e?.state === "pending" && Date.now() - e.startedAt > STALE_EXTRACTION_MS;
-  if (recipe.status !== "draft" || !(e?.state === "failed" || lost)) {
+  if (recipe.status !== "draft" || !readingStuck(recipe)) {
     throw new ConvexError({ code: "CANNOT_RETRY" });
   }
   if ((await photosOf(ctx, recipeId)).length === 0) {
@@ -372,51 +451,121 @@ function isCurrentRun(recipe: Doc<"recipes"> | null, startedAt: number): boolean
   );
 }
 
+type ReadDraft = {
+  name: string;
+  baseServings?: number;
+  steps: string[];
+  lines: { raw: string; amount?: number; unit?: string; optional?: boolean; uncertain?: boolean }[];
+  continuesOffPage?: boolean;
+  pageSide?: string;
+};
+
+/** The draft's fields and lines as read; the run moves on to matching. */
+async function writeReading(
+  ctx: MutationCtx,
+  recipeId: Id<"recipes">,
+  draft: ReadDraft,
+  extraction: Doc<"recipes">["extraction"],
+) {
+  await ctx.db.patch("recipes", recipeId, {
+    name: draft.name.slice(0, MAX_NAME),
+    baseServings: draft.baseServings,
+    // A new reading asks again: "Nevím" was about the earlier pages.
+    servingsUnknown: undefined,
+    continuesOffPage: draft.continuesOffPage || undefined,
+    steps: draft.steps.slice(0, MAX_STEPS).map((s) => s.slice(0, MAX_STEP)),
+    extraction,
+  });
+  await replaceLines(
+    ctx,
+    recipeId,
+    draft.lines.slice(0, MAX_LINES).map((l) => ({
+      raw: l.raw.slice(0, MAX_RAW),
+      amount: l.amount,
+      unit: l.unit?.slice(0, MAX_UNIT),
+      optional: l.optional ?? false,
+      ...(l.uncertain ? { uncertain: true } : {}),
+    })),
+  );
+}
+
+/** Which recipe of a new reading is the one a spread draft stands for. */
+function sameRecipeIndex(spread: NonNullable<Doc<"recipes">["spread"]>, drafts: ReadDraft[]) {
+  const bySide = drafts.findIndex((d) => d.pageSide && d.pageSide === spread.pageSide);
+  if (bySide >= 0) return bySide;
+  return spread.index < drafts.length ? spread.index : 0;
+}
+
 /**
  * Writes the AI's reading into the draft (lines replace any earlier ones) and
- * moves on to the "Páruji suroviny" stage. Returns the Household's Ingredient
- * names for matching, or null if this run is no longer current.
+ * moves on to the "Páruji suroviny" stage. `others` are further recipes on
+ * the same photo: on a first reading each becomes its own draft sharing the
+ * photo, and the user then picks which to keep (#21). Re-reading a draft
+ * from a spread keeps to its own recipe. Returns the drafts written (with
+ * the index of their recipe in `[draft, ...others]`) and the Household's
+ * Ingredient names for matching, or null if this run is no longer current.
  */
 export const applyExtraction = internalMutation({
   args: {
     recipeId: v.id("recipes"),
     startedAt: v.number(),
     model: v.string(),
-    draft: v.object({
-      name: v.string(),
-      baseServings: v.optional(v.number()),
-      steps: v.array(v.string()),
-      lines: v.array(vReadLine),
-      continuesOffPage: v.optional(v.boolean()),
-    }),
+    draft: vReadDraft,
+    others: v.optional(v.array(vReadDraft)),
   },
-  returns: v.union(v.null(), v.object({ catalogue: v.array(v.string()) })),
-  handler: async (ctx, { recipeId, startedAt, model, draft }) => {
+  returns: v.union(
+    v.null(),
+    v.object({
+      catalogue: v.array(v.string()),
+      written: v.array(v.object({ recipeId: v.id("recipes"), index: v.number() })),
+    }),
+  ),
+  handler: async (ctx, { recipeId, startedAt, model, draft, others = [] }) => {
     const recipe = await ctx.db.get("recipes", recipeId);
     // Discarded meanwhile, or superseded by a retry: drop this result.
     if (!isCurrentRun(recipe, startedAt)) return null;
-    await ctx.db.patch("recipes", recipeId, {
-      name: draft.name.slice(0, MAX_NAME),
-      baseServings: draft.baseServings,
-      // A new reading asks again: "Nevím" was about the earlier pages.
-      servingsUnknown: undefined,
-      continuesOffPage: draft.continuesOffPage || undefined,
-      steps: draft.steps.slice(0, MAX_STEPS).map((s) => s.slice(0, MAX_STEP)),
-      extraction: { state: "pending", stage: "match", model, startedAt },
-    });
-    await replaceLines(
-      ctx,
-      recipeId,
-      draft.lines.slice(0, MAX_LINES).map((l) => ({
-        raw: l.raw.slice(0, MAX_RAW),
-        amount: l.amount,
-        unit: l.unit?.slice(0, MAX_UNIT),
-        optional: l.optional ?? false,
-        ...(l.uncertain ? { uncertain: true } : {}),
-      })),
-    );
+    const drafts = [draft, ...others].slice(0, MAX_SPREAD);
+    const extraction = { state: "pending" as const, stage: "match" as const, model, startedAt };
+    const written: { recipeId: Id<"recipes">; index: number }[] = [];
+    if (recipe!.spread) {
+      const index = sameRecipeIndex(recipe!.spread, drafts);
+      await writeReading(ctx, recipeId, drafts[index], extraction);
+      written.push({ recipeId, index });
+    } else {
+      // Only a first reading splits; a re-read of a reviewed draft (lines
+      // already there) stays one recipe.
+      const split = drafts.length > 1 && (await linesOf(ctx, recipeId)).length === 0;
+      await writeReading(ctx, recipeId, drafts[0], extraction);
+      written.push({ recipeId, index: 0 });
+      if (split) {
+        const spreadOf = (index: number) => ({
+          group: recipeId,
+          index,
+          pageSide: drafts[index].pageSide,
+          choosing: true,
+        });
+        await ctx.db.patch("recipes", recipeId, { spread: spreadOf(0) });
+        const photos = await photosOf(ctx, recipeId);
+        for (let index = 1; index < drafts.length; index++) {
+          const sibling = await ctx.db.insert("recipes", {
+            household: recipe!.household,
+            name: "",
+            category: recipe!.category,
+            status: "draft",
+            archived: false,
+            steps: [],
+            spread: spreadOf(index),
+          });
+          for (const p of photos) {
+            await ctx.db.insert("recipePhotos", { recipe: sibling, storageId: p.storageId, order: p.order });
+          }
+          await writeReading(ctx, sibling, drafts[index], extraction);
+          written.push({ recipeId: sibling, index });
+        }
+      }
+    }
     const catalogue = await catalogueOf(ctx, recipe!.household);
-    return { catalogue: catalogue.map((i) => i.name) };
+    return { catalogue: catalogue.map((i) => i.name), written };
   },
 });
 
@@ -468,6 +617,55 @@ export const failExtraction = internalMutation({
   },
 });
 
+// ---------- several recipes on one photo ----------
+
+/** The drafts read from the same photo as a spread `group`, in reading order. */
+async function spreadDrafts(ctx: QueryCtx, household: Id<"households">, group: Id<"recipes">) {
+  const drafts = await ctx.db
+    .query("recipes")
+    .withIndex("by_household_status", (q) => q.eq("household", household).eq("status", "draft"))
+    .collect();
+  return drafts
+    .filter((r) => r.spread?.group === group)
+    .sort((a, b) => a.spread!.index - b.spread!.index);
+}
+
+/**
+ * "Na fotce je víc receptů": keeps the picked drafts from the photo and
+ * discards the rest (the photo stays while any kept draft shows it). Returns
+ * the first kept draft, to review first, or null when none was kept.
+ */
+export const chooseFromPhoto = mutation({
+  args: { recipeId: v.id("recipes"), keep: v.array(v.id("recipes")) },
+  returns: v.union(v.null(), v.id("recipes")),
+  handler: async (ctx, args) => chooseFromPhotoFor(ctx, await requireMember(ctx), args),
+});
+
+export async function chooseFromPhotoFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId, keep }: { recipeId: Id<"recipes">; keep: Id<"recipes">[] },
+): Promise<Id<"recipes"> | null> {
+  const recipe = await loadRecipe(ctx, member, recipeId);
+  if (recipe.status !== "draft" || !recipe.spread?.choosing) {
+    throw new ConvexError({ code: "ALREADY_CHOSEN" });
+  }
+  const group = await spreadDrafts(ctx, member.household, recipe.spread.group);
+  const ids = new Set(group.map((r) => r._id));
+  if (keep.some((id) => !ids.has(id))) throw new ConvexError({ code: "NOT_FOUND" });
+  const kept = new Set(keep);
+  let first: Id<"recipes"> | null = null;
+  for (const r of group) {
+    if (kept.has(r._id)) {
+      await ctx.db.patch("recipes", r._id, { spread: { ...r.spread!, choosing: false } });
+      first ??= r._id;
+    } else {
+      await deleteDraft(ctx, r._id);
+    }
+  }
+  return first;
+}
+
 // ---------- reading for the UI ----------
 
 async function firstPhotoUrl(ctx: QueryCtx, recipeId: Id<"recipes">) {
@@ -497,6 +695,7 @@ export const library = query({
       category: r.category,
       baseServings: r.baseServings,
       extractionState: r.extraction?.state ?? null,
+      choosing: r.spread?.choosing ?? false,
       photoUrl: await firstPhotoUrl(ctx, r._id),
     });
     const confirmed = (await byStatus("confirmed")).filter((r) => !r.archived);
@@ -560,6 +759,19 @@ export const get = query({
     );
     const lines = await lineViewsFor(ctx, member, recipeId);
     const e = recipe.extraction;
+    // Drafts still waiting from the same photo, for the chooser and "Další z fotky".
+    const fromPhoto = recipe.spread
+      ? await Promise.all(
+          (await spreadDrafts(ctx, member.household, recipe.spread.group)).map(async (r) => ({
+              _id: r._id,
+              name: r.name,
+              pageSide: r.spread!.pageSide ?? null,
+              lineCount: (await linesOf(ctx, r._id)).length,
+              extractionState: r.extraction?.state ?? null,
+              choosing: r.spread!.choosing,
+            })),
+        )
+      : [];
     return {
       _id: recipe._id,
       name: recipe.name,
@@ -581,6 +793,9 @@ export const get = query({
         : null,
       photos,
       lines,
+      spread: recipe.spread
+        ? { choosing: recipe.spread.choosing, pageSide: recipe.spread.pageSide ?? null, drafts: fromPhoto }
+        : null,
     };
   },
 });
@@ -843,6 +1058,7 @@ export async function confirmFor(
   if (recipe.extraction?.state === "failed") {
     throw new ConvexError({ code: "EXTRACTION_FAILED" });
   }
+  if (recipe.spread?.choosing) throw new ConvexError({ code: "CHOOSE_FIRST" });
   if (!recipe.name.trim()) throw new ConvexError({ code: "NAME_REQUIRED" });
   const lines = await linesOf(ctx, recipeId);
   const checks = checkQueue(
@@ -896,14 +1112,15 @@ export async function discardFor(
 ): Promise<null> {
   const recipe = await loadRecipe(ctx, member, recipeId);
   if (recipe.status !== "draft") throw new ConvexError({ code: "NOT_A_DRAFT" });
+  await deleteDraft(ctx, recipeId);
+  return null;
+}
+
+async function deleteDraft(ctx: MutationCtx, recipeId: Id<"recipes">) {
   for (const line of await linesOf(ctx, recipeId)) {
     await ctx.db.delete("ingredientLines", line._id);
   }
-  for (const photo of await photosOf(ctx, recipeId)) {
-    await ctx.db.delete("recipePhotos", photo._id);
-    await ctx.storage.delete(photo.storageId);
-  }
+  await deletePhotos(ctx, recipeId);
   // A reading run still in flight finds the recipe gone and stops.
   await ctx.db.delete("recipes", recipeId);
-  return null;
 }

@@ -133,12 +133,26 @@ export type DraftFields = {
 
 export const MAX_SERVINGS = 50;
 
+/** Where a recipe sits on the photo, as the model reports it. */
+export type PageSide = Extraction["recipes"][number]["pageSide"];
+
 /**
- * Draft Recipe fields from the first extracted recipe. Further recipes on a
- * spread are handled by the edge-flow ticket (#21).
+ * Draft Recipe fields for every recipe on the photo (a spread may hold
+ * several, #21), in the model's order. Recipes with no name, lines or steps
+ * are dropped; if all are empty the first is kept so the user can fill it in.
  */
+export function draftsFromExtraction(result: Extraction): (DraftFields & { pageSide: PageSide })[] {
+  const all = result.recipes.map((r) => ({ ...draftFromRecipe(r), pageSide: r.pageSide }));
+  const useful = all.filter((d) => d.name || d.lines.length || d.steps.length);
+  return useful.length ? useful : all.slice(0, 1);
+}
+
+/** Draft Recipe fields from the first extracted recipe. */
 export function draftFromExtraction(result: Extraction): DraftFields {
-  const recipe = result.recipes[0];
+  return draftFromRecipe(result.recipes[0]);
+}
+
+function draftFromRecipe(recipe: Extraction["recipes"][number]): DraftFields {
   const servings =
     recipe.servings === null ? undefined : Math.round(recipe.servings);
   const uncertain = new Set(recipe.uncertain.map(rawKey));

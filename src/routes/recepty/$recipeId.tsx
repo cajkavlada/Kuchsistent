@@ -3,7 +3,13 @@ import { useQuery } from "convex/react";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Review } from "~/components/recipes/Review";
-import { RecipeDetail, Reading, ReadingFailed, Saved } from "~/components/recipes/screens";
+import {
+  ChooseFromPhoto,
+  RecipeDetail,
+  Reading,
+  ReadingFailed,
+  Saved,
+} from "~/components/recipes/screens";
 import { TopBar } from "~/components/recipes/ui";
 
 export const Route = createFileRoute("/recepty/$recipeId")({
@@ -12,12 +18,14 @@ export const Route = createFileRoute("/recepty/$recipeId")({
 
 /**
  * One Recipe, shown by where it stands: being read, failed, awaiting review,
- * just saved, or confirmed. Opening a draft from "Rozpracované" resumes here.
+ * several recipes on the photo to pick from, awaiting review, just saved,
+ * or confirmed. Opening a draft from "Rozpracované" resumes here.
  */
 function RecipeScreen() {
   const { recipeId } = Route.useParams();
   const recipe = useQuery(api.recipes.get, { recipeId });
-  const [justSaved, setJustSaved] = useState(false);
+  // Which recipe was just saved: "Další z fotky" reuses this screen for the next one.
+  const [justSaved, setJustSaved] = useState<string | null>(null);
 
   if (recipe === undefined) {
     return (
@@ -35,9 +43,10 @@ function RecipeScreen() {
     );
   }
   if (recipe.status === "confirmed") {
-    return justSaved ? <Saved recipe={recipe} /> : <RecipeDetail recipe={recipe} />;
+    return justSaved === recipe._id ? <Saved recipe={recipe} /> : <RecipeDetail recipe={recipe} />;
   }
   if (recipe.extraction?.state === "pending") return <Reading recipe={recipe} />;
   if (recipe.extraction?.state === "failed") return <ReadingFailed recipe={recipe} />;
-  return <Review recipe={recipe} onSaved={() => setJustSaved(true)} />;
+  if (recipe.spread?.choosing) return <ChooseFromPhoto recipe={recipe} />;
+  return <Review key={recipe._id} recipe={recipe} onSaved={() => setJustSaved(recipe._id)} />;
 }

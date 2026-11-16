@@ -87,6 +87,20 @@ export default defineSchema({
         stage: v.optional(v.union(v.literal("read"), v.literal("match"))),
       }),
     ),
+    /**
+     * Set when one photo held several recipes (#21): each became its own draft
+     * sharing the photo. `group` is the draft the photo was taken for (it may
+     * have been discarded since), `index` the recipe's place in the reading.
+     * While `choosing`, the user still picks which of them to keep.
+     */
+    spread: v.optional(
+      v.object({
+        group: v.id("recipes"),
+        index: v.number(),
+        pageSide: v.optional(v.string()),
+        choosing: v.boolean(),
+      }),
+    ),
   }).index("by_household_status", ["household", "status"]),
 
   /** A Recipe Photo: the resized JPEG of a cookbook page, kept with the Recipe. */
