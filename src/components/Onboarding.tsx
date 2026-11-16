@@ -3,6 +3,8 @@ import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
+import { normalizeInviteCode } from "@convex/lib/inviteCode";
+import { inviteErrorMessage } from "~/lib/invite";
 
 type Step = "choose" | "create" | "invite";
 
@@ -31,13 +33,7 @@ export function Onboarding({ mayCreate }: { mayCreate: boolean }) {
         ) : (
           <NoInvite onBack={() => setStep("choose")} />
         ))}
-      {step === "invite" && (
-        <>
-          <p>Připojení pozvánkou brzy přibude.</p>
-          <p className="muted">Zatím požádej člena domácnosti o odkaz s pozvánkou.</p>
-          <button className="btn" onClick={() => setStep("choose")}>Zpět</button>
-        </>
-      )}
+      {step === "invite" && <RedeemCode onBack={() => setStep("choose")} />}
       <button className="link" onClick={() => void signOut()}>Odhlásit se</button>
     </main>
   );
@@ -94,6 +90,59 @@ function CreateHousehold({ onBack }: { onBack: () => void }) {
       <p className="muted small">Dá se kdykoli změnit v nastavení.</p>
       <button className="btn primary" type="submit" disabled={busy}>
         {busy ? "Zakládám…" : "Založit domácnost"}
+      </button>
+      <button className="btn" type="button" onClick={onBack} disabled={busy}>Zpět</button>
+      {error && <p className="error" role="alert">{error}</p>}
+    </form>
+  );
+}
+
+/** "Mám pozvánku": type the short code (or paste the whole link). */
+function RedeemCode({ onBack }: { onBack: () => void }) {
+  const redeem = useMutation(api.invites.redeem);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const normalized = normalizeInviteCode(code);
+    if (normalized === null) {
+      setError("Kód má 6 znaků, například K7M-2QX.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await redeem({ code: normalized });
+      // `me` re-runs reactively and the Gate switches to the app.
+    } catch (err) {
+      setError(inviteErrorMessage(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="stack" onSubmit={submit}>
+      <h1>Mám pozvánku</h1>
+      <label className="field">
+        <span>Kód pozvánky</span>
+        <input
+          className="input code"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="K7M-2QX"
+          autoCapitalize="characters"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="go"
+          autoFocus
+        />
+      </label>
+      <p className="muted small">Kód ti pošle člen domácnosti z Nastavení. Můžeš vložit i celý odkaz.</p>
+      <button className="btn primary" type="submit" disabled={busy || code.trim() === ""}>
+        {busy ? "Připojuji…" : "Připojit se"}
       </button>
       <button className="btn" type="button" onClick={onBack} disabled={busy}>Zpět</button>
       {error && <p className="error" role="alert">{error}</p>}

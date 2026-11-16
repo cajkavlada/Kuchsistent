@@ -31,4 +31,19 @@ export default defineSchema({
    * so production never has it.
    */
   testMode: defineTable({ enabled: v.boolean() }),
+
+  /**
+   * A single-use, 7-day link + short code for joining a Household (#11).
+   * `code` is stored in display form, e.g. "K7M-2QX".
+   */
+  invites: defineTable({
+    household: v.id("households"),
+    code: v.string(),
+    createdBy: v.id("users"),
+    expiresAt: v.number(),
+    usedBy: v.optional(v.id("users")),
+    usedAt: v.optional(v.number()),
+  })
+    .index("by_code", ["code"])
+    .index("by_household", ["household"]),
 });

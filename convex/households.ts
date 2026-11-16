@@ -46,6 +46,51 @@ async function userMayCreateHousehold(
   return user.testUser === true && (await isTestMode(ctx));
 }
 
+/** "Členové": every Member of the caller's Household, as their Google name + photo. */
+export const members = query({
+  args: {},
+  handler: async (ctx) => {
+    const { household, userId } = await requireMember(ctx);
+    return await membersOf(ctx, household, userId);
+  },
+});
+
+/** Shared by `members`; exported for tests. */
+export async function membersOf(
+  ctx: Pick<QueryCtx, "db">,
+  household: Id<"households">,
+  me: Id<"users">,
+) {
+  const memberships = await ctx.db
+    .query("memberships")
+    .withIndex("by_household", (q) => q.eq("household", household))
+    .collect();
+  const result = [];
+  for (const m of memberships) {
+    const user = await ctx.db.get("users", m.userId);
+    if (user === null) continue;
+    result.push({
+      _id: user._id,
+      name: user.name ?? user.email ?? "",
+      image: user.image ?? null,
+      isMe: user._id === me,
+    });
+  }
+  return result;
+}
+
+/** Edit default Portions in settings; all Members may. */
+export const setDefaultPortions = mutation({
+  args: { defaultPortions: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { defaultPortions }) => {
+    const { household } = await requireMember(ctx);
+    validatePortions(defaultPortions);
+    await ctx.db.patch("households", household, { defaultPortions });
+    return null;
+  },
+});
+
 export const MIN_PORTIONS = 1;
 export const MAX_PORTIONS = 20;
 
