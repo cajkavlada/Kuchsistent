@@ -82,6 +82,21 @@ _Avoid_: List entry
 **Manual Shopping Item**:
 A Shopping Item the user added directly (e.g. toilet paper), not tied to any meal and never changed by regeneration.
 
+**Never Buy**:
+A mark on an Ingredient that is never purchased (e.g. water); it never appears on the shopping list.
+_Avoid_: Excluded, ignored
+
+**Optional Line**:
+An Ingredient Line the recipe treats as optional ("případně", "na ozdobu"); listed with a "volitelné" note.
+
+**Measure Kind**:
+How an Ingredient is counted on the list: by weight, by volume or by pieces.
+_Avoid_: Unit type
+
+**Store Section**:
+The supermarket area an Ingredient is found in; groups the shopping list in walking order.
+_Avoid_: Category, aisle
+
 **Plenty**:
 A standing mark on an Ingredient meaning "we have enough at home"; it moves the Ingredient to a "we have plenty" section at the bottom of the shopping list until someone marks it running low.
 _Avoid_: Staple, pantry, in stock
