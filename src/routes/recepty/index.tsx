@@ -7,16 +7,17 @@ import { today } from "@convex/lib/dates";
 import { errorMessage } from "~/lib/format";
 import { useOnline } from "~/pwa";
 import {
+  FilterBar,
   IngredientSheet,
+  NoResults,
   RecipeSheet,
-  Tile,
+  Shelves,
   TileGrid,
   type LibraryItem,
-  type LibraryRow,
 } from "~/components/recipes/library";
 import {
+  LIBRARY_SHELVES,
   NO_FILTERS,
-  hasFilters,
   isSearching,
   query,
   resultsLabel,
@@ -25,7 +26,7 @@ import {
   type ShelfKey,
 } from "~/lib/library";
 
-const SHELF_KEYS: ShelfKey[] = ["fav", "stale", "often", "new", "all"];
+const SHELF_KEYS = LIBRARY_SHELVES;
 
 type LibrarySearch = {
   /** "Vše N ›": the whole shelf as a grid. A search param so Back closes it. */
@@ -38,17 +39,6 @@ export const Route = createFileRoute("/recepty/")({
   }),
   component: Library,
 });
-
-const CATEGORY_CHIPS = [
-  ["main", "Hlavní jídla"],
-  ["special", "Speciality"],
-  ["all", "Vše"],
-] as const;
-
-/** Rail tiles per shelf; the rest is behind "Vše N ›". */
-const RAIL_MAX = 12;
-/** "Všechny recepty" shows this many as a grid. */
-const ALL_PREVIEW = 6;
 
 /**
  * Recepty (#25, decision #12 variant B): drafts under "Rozpracované", then a
@@ -132,23 +122,7 @@ function Library() {
     } else if (list.length === 0) {
       body = <NoResults onReset={() => setFilters(NO_FILTERS)} />;
     } else {
-      body = list.map((s) => (
-        <div key={s.key} className="shelf">
-          <div className="shelf-h">
-            <h3>
-              {s.title} {s.sub && <small>· {s.sub}</small>}
-            </h3>
-            <button type="button" className="shelf-all" onClick={() => openShelf(s.key)}>
-              Vše {s.rows.length} ›
-            </button>
-          </div>
-          {s.key === "all" ? (
-            <TileGrid rows={s.rows.slice(0, ALL_PREVIEW)} onOpen={setOpen} />
-          ) : (
-            <Rail rows={s.rows.slice(0, RAIL_MAX)} onOpen={setOpen} />
-          )}
-        </div>
-      ));
+      body = <Shelves list={list} onShelf={openShelf} onOpen={setOpen} />;
     }
   }
 
@@ -169,47 +143,7 @@ function Library() {
 
       {recipes.length > 0 && (
         <>
-          <div className="search">
-            <span aria-hidden="true">⌕</span>
-            <input
-              type="search"
-              placeholder="Hledat recept nebo surovinu…"
-              value={filters.text}
-              onChange={(e) => set({ text: e.target.value })}
-              aria-label="Hledat recept nebo surovinu"
-              autoComplete="off"
-            />
-            {filters.text && (
-              <button type="button" className="x" aria-label="Smazat hledání" onClick={() => set({ text: "" })}>
-                ×
-              </button>
-            )}
-          </div>
-          <div className="chips chiprow">
-            {CATEGORY_CHIPS.map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                className={`chip${filters.category === k ? " on" : ""}`}
-                aria-pressed={filters.category === k}
-                onClick={() => set({ category: k })}
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`chip${filters.ingredients.length ? " on" : ""}`}
-              onClick={() => setIngSheet(true)}
-            >
-              🥕 {filters.ingredients.length ? filters.ingredients.join(" + ") : "Se surovinou…"}
-            </button>
-            {hasFilters(filters) && (
-              <button type="button" className="chip acc" onClick={() => setFilters(NO_FILTERS)}>
-                Zrušit filtry
-              </button>
-            )}
-          </div>
+          <FilterBar filters={filters} onChange={set} onIngredients={() => setIngSheet(true)} />
         </>
       )}
 
@@ -226,27 +160,6 @@ function Library() {
       )}
       {open && <RecipeSheet recipeId={open} onClose={() => setOpen(null)} />}
     </section>
-  );
-}
-
-function Rail({ rows, onOpen }: { rows: LibraryRow[]; onOpen: (id: Id<"recipes">) => void }) {
-  return (
-    <div className="rail">
-      {rows.map((x) => (
-        <Tile key={x.r._id} row={x} onOpen={onOpen} />
-      ))}
-    </div>
-  );
-}
-
-function NoResults({ onReset }: { onReset: () => void }) {
-  return (
-    <div className="empty-res">
-      <p className="muted">Nic nenalezeno. Zkus jiné slovo nebo zruš filtry.</p>
-      <button type="button" className="chip" onClick={onReset}>
-        Zrušit hledání a filtry
-      </button>
-    </div>
   );
 }
 

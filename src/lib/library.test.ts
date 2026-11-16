@@ -8,6 +8,8 @@ import {
   historyLine,
   ingredientCounts,
   match,
+  PICKER_SHELVES,
+  nearBadge,
   nearHint,
   query,
   resultsLabel,
@@ -140,6 +142,15 @@ describe("shelves", () => {
     expect(names.all).toEqual(["Apple", "Bramboráky", "Buchty", "Čočka", "Dýně", "Rizoto", "Zelňačka"]);
   });
 
+  test("picker order: Oblíbené, Často vaříme, Dlouho jsme nevařili, Nové, Všechny", () => {
+    const fav = recipe({ name: "Zelňačka", favourite: true });
+    const stale = recipe({ name: "Bramboráky", mealDates: ["2026-09-01"] });
+    const often = recipe({ name: "Rizoto", mealDates: ["2026-11-01", "2026-11-08"] });
+    const fresh = recipe({ name: "Buchty" });
+    const sh = shelves(query([fav, stale, often, fresh], NO_FILTERS, TODAY), PICKER_SHELVES);
+    expect(sh.map((s) => s.key)).toEqual(["fav", "often", "stale", "new", "all"]);
+  });
+
   test("empty shelves are hidden", () => {
     const sh = shelves(query([recipe({ name: "Nový" })], NO_FILTERS, TODAY));
     expect(sh.map((s) => s.key)).toEqual(["new", "all"]);
@@ -164,4 +175,13 @@ test("resultsLabel", () => {
 test("nearHint: nearest Planned Meal within four days", () => {
   expect(nearHint(["2026-11-10", "2026-11-18", "2026-11-23"], "2026-11-19")).toBe("2026-11-18");
   expect(nearHint(["2026-11-10"], "2026-11-19")).toBeNull();
+});
+
+test("nearBadge: planned or cooked within four days, else nothing", () => {
+  const today = "2026-11-17";
+  expect(nearBadge(["2026-11-20"], "2026-11-21", today)).toBe("v plánu Pá 20. 11.");
+  expect(nearBadge(["2026-11-14"], "2026-11-18", today)).toBe("vařeno So 14. 11.");
+  expect(nearBadge(["2026-11-21"], "2026-11-21", today)).toBe("v plánu So 21. 11.");
+  expect(nearBadge(["2026-11-10", "2026-11-26"], "2026-11-21", today)).toBeNull();
+  expect(nearBadge([], "2026-11-21", today)).toBeNull();
 });

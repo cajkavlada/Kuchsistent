@@ -171,11 +171,16 @@ export const STALE_DAYS = 30;
 /** "Často vaříme": cooked at least this often within the last 90 days. */
 export const OFTEN_MIN = 2;
 
+/** The library's shelf order (#12). */
+export const LIBRARY_SHELVES: ShelfKey[] = ["fav", "stale", "often", "new", "all"];
+/** The picker leads with what is cooked regularly (#26): Oblíbené, Často vaříme, Dlouho jsme nevařili, Nové, Všechny. */
+export const PICKER_SHELVES: ShelfKey[] = ["fav", "often", "stale", "new", "all"];
+
 /**
- * The shelves, in the library's order (#12); empty ones are left out.
+ * The shelves in `order` (the library's by default); empty ones are left out.
  * `rows` is the output of `query` (A–Z when there is no search).
  */
-export function shelves<R extends LibraryRecipe>(rows: Row<R>[]): Shelf<R>[] {
+export function shelves<R extends LibraryRecipe>(rows: Row<R>[], order: ShelfKey[] = LIBRARY_SHELVES): Shelf<R>[] {
   const az = [...rows].sort(byName);
   const list: Shelf<R>[] = [
     { key: "fav", title: "★ Oblíbené", rows: az.filter((x) => x.r.favourite) },
@@ -204,7 +209,9 @@ export function shelves<R extends LibraryRecipe>(rows: Row<R>[]): Shelf<R>[] {
     },
     { key: "all", title: "Všechny recepty", sub: "A–Z", rows: az },
   ];
-  return list.filter((s) => s.rows.length > 0);
+  return order
+    .map((key) => list.find((s) => s.key === key)!)
+    .filter((s) => s.rows.length > 0);
 }
 
 /** Ingredients used by the Recipes, most used first (the "Se surovinou" sheet). */
@@ -232,4 +239,15 @@ export function nearHint(mealDates: CalendarDay[], target: CalendarDay): Calenda
     .filter((d) => Math.abs(daysBetween(d, target)) <= 4)
     .sort((a, b) => Math.abs(daysBetween(a, target)) - Math.abs(daysBetween(b, target)));
   return near[0] ?? null;
+}
+
+/**
+ * The picker tile's amber badge (#26): "v plánu Pá 20. 11." or
+ * "vařeno St 18. 11." for the same Recipe within four days of `target`;
+ * null when there is none. Only a warning: nothing is blocked.
+ */
+export function nearBadge(mealDates: CalendarDay[], target: CalendarDay, today: CalendarDay): string | null {
+  const near = nearHint(mealDates, target);
+  if (near === null) return null;
+  return `${near < today ? "vařeno" : "v plánu"} ${dayLabel(near)}`;
 }
