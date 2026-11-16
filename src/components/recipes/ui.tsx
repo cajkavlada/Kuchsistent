@@ -20,10 +20,13 @@ export function Sheet({
   title,
   onClose,
   children,
+  hideTitle = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** The content shows the title itself; keep it for screen readers only. */
+  hideTitle?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -35,7 +38,7 @@ export function Sheet({
       <div className="shade" onClick={onClose} />
       <div className="sheet" role="dialog" aria-modal="true" aria-label={title}>
         <div className="sheet-in">
-          <h2>{title}</h2>
+          <h2 className={hideTitle ? "sr-only" : undefined}>{title}</h2>
           {children}
         </div>
       </div>
