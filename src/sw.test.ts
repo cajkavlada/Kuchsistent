@@ -134,6 +134,7 @@ describe("service worker", () => {
 
   it("caches the shell, every bundle and the icons on install", () => {
     expect(sw.cached()).toEqual([
+      "/__precache",
       "/__shell",
       "/assets/index-v1.js",
       "/assets/nakup-v1.js",
@@ -167,13 +168,16 @@ describe("service worker", () => {
     expect(await sw.request("/api/anything", "cors", "POST")).toBeNull();
   });
 
-  it("picks up a new deploy on the next launch and drops old bundles", async () => {
+  it("picks up a new deploy on the next launch, keeping the previous deploy's bundles", async () => {
     deploy(sw, "v2");
     const page = await sw.request("/plan", "navigate");
     expect(await page!.text()).toBe("<html>shell v2</html>");
     expect(sw.cached()).toEqual([
+      "/__precache",
       "/__shell",
+      "/assets/index-v1.js",
       "/assets/index-v2.js",
+      "/assets/nakup-v1.js",
       "/assets/nakup-v2.js",
       "/icon-192.png",
       "/icon-512.png",
@@ -183,6 +187,35 @@ describe("service worker", () => {
     sw.setOnline(false);
     const offline = await sw.request("/plan", "navigate");
     expect(await offline!.text()).toBe("<html>shell v2</html>");
+  });
+
+  it("still serves the old deploy's chunks to a page running the old shell", async () => {
+    // A slow network served the cached v1 shell; meanwhile v2 arrived and synced.
+    deploy(sw, "v2");
+    await sw.request("/plan", "navigate");
+    sw.routes({ "/assets/nakup-v1.js": () => new Response("gone", { status: 404 }) });
+    const js = await sw.request("/assets/nakup-v1.js");
+    expect(js!.status).toBe(200);
+    expect(await js!.text()).toBe("nakup v1");
+  });
+
+  it("drops bundles two deploys old", async () => {
+    deploy(sw, "v2");
+    await sw.request("/plan", "navigate");
+    deploy(sw, "v3");
+    await sw.request("/plan", "navigate");
+    expect(sw.cached()).toEqual([
+      "/__precache",
+      "/__shell",
+      "/assets/index-v2.js",
+      "/assets/index-v3.js",
+      "/assets/nakup-v2.js",
+      "/assets/nakup-v3.js",
+      "/icon-192.png",
+      "/icon-512.png",
+      "/icon.svg",
+      "/site.webmanifest",
+    ]);
   });
 
   it("fails to install without a shell, rather than caching nothing", async () => {
