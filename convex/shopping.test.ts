@@ -16,7 +16,21 @@ import {
   setPortionsFor,
 } from "./plan";
 import { mergeFor, setPlentyFor } from "./ingredients";
-import { itemFor, listFor, regenerateShopping, removeItemFor, setCheckedFor } from "./shopping";
+import {
+  addManualItemFor,
+  addTripFor,
+  deleteTripFor,
+  itemFor,
+  listFor,
+  moveItemFor,
+  moveTripFor,
+  regenerateShopping,
+  removeItemFor,
+  setCheckedFor,
+  setTripKindFor,
+  setTripStatusFor,
+} from "./shopping";
+import { setTripIntervalFor } from "./households";
 import { NOT_NEEDED } from "./lib/shopping";
 
 type T = ReturnType<typeof convexTest>;
@@ -611,5 +625,237 @@ describe("marks, warnings and the item sheet (#29)", () => {
     expect(await allItems(t)).toHaveLength(0);
     // A second tap after it's gone is harmless.
     await t.run((ctx) => removeItemFor(ctx, m, i._id));
+  });
+});
+
+describe("trip management (#30)", () => {
+  const trips = (t: T) => t.run((ctx) => ctx.db.query("shoppingTrips").collect());
+  const tripOn = async (t: T, date: string) => (await trips(t)).find((x) => x.date === date)!;
+
+  async function setup(t: T) {
+    const m = await newMember(t);
+    const beef = await ingredient(t, m, "hovězí");
+    const r = await recipe(t, m, [{ ingredient: beef, amount: 500, unit: "g" }], 4);
+    return { m, beef, r };
+  }
+
+  test("manual items go on open trips only and are never touched by regeneration", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    const trip = await tripOn(t, "2026-11-16");
+    await expect(
+      t.run((ctx) => addManualItemFor(ctx, m, { tripId: trip._id, label: "  " }, TODAY)),
+    ).rejects.toThrow(/INVALID_LABEL/);
+    const id = await t.run((ctx) =>
+      addManualItemFor(ctx, m, { tripId: trip._id, label: "  toaletní   papír " }, TODAY),
+    );
+    await regen(t, m);
+    const row = (await list(t, m)).trips[0].items.find((i) => i._id === id)!;
+    expect(row).toMatchObject({ label: "toaletní papír", manual: true, storeSection: "other", plenty: false });
+    // Another Household can't add to it.
+    const other = await newMember(t, "b@example.com");
+    await expect(
+      t.run((ctx) => addManualItemFor(ctx, other, { tripId: trip._id, label: "x" }, TODAY)),
+    ).rejects.toThrow(/NOT_FOUND/);
+    // A done trip takes no new items.
+    await t.run((ctx) => setTripStatusFor(ctx, m, { tripId: trip._id, status: "done" }, TODAY));
+    await expect(
+      t.run((ctx) => addManualItemFor(ctx, m, { tripId: trip._id, label: "jar" }, TODAY)),
+    ).rejects.toThrow(/TRIP_DONE/);
+    // "Smazat" removes a manual item, ticked or not.
+    await t.run((ctx) => setCheckedFor(ctx, m, { itemId: id, checked: true }));
+    await t.run((ctx) => removeItemFor(ctx, m, id));
+    expect((await allItems(t)).some((i) => i._id === id)).toBe(false);
+  });
+
+  test("a moved item is pinned, keeps updating its amount and survives regeneration", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    const id = await meal(t, m, r, "2026-11-19");
+    await regen(t, m);
+    // Trips 16 and 18; the meal on 19 goes to 18.
+    let [item] = await allItems(t);
+    const t16 = await tripOn(t, "2026-11-16");
+    const t18 = await tripOn(t, "2026-11-18");
+    expect(item.trip).toBe(t18._id);
+
+    await t.run((ctx) => moveItemFor(ctx, m, { itemId: item._id, tripId: t16._id }, TODAY));
+    [item] = await allItems(t);
+    expect(item).toMatchObject({ trip: t16._id, pinned: true, amount: 500 });
+
+    await t.run((ctx) => ctx.db.patch("plannedMeals", id, { portions: 8 }));
+    await regen(t, m);
+    const items = await allItems(t);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ _id: item._id, trip: t16._id, pinned: true, amount: 1000 });
+    expect((await list(t, m)).trips[0].items[0].pinned).toBe(true);
+  });
+
+  test("moving to a trip after the meal is refused; the sheet marks it 'až po jídle'", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-17", 4, "lunch");
+    await meal(t, m, r, "2026-11-20");
+    await regen(t, m);
+    const t16 = await tripOn(t, "2026-11-16");
+    const t18 = await tripOn(t, "2026-11-18");
+    const item = (await allItems(t)).find((i) => i.trip === t16._id)!;
+    await expect(
+      t.run((ctx) => moveItemFor(ctx, m, { itemId: item._id, tripId: t18._id }, TODAY)),
+    ).rejects.toThrow(/TRIP_AFTER_MEAL/);
+    const sheet = await t.run((ctx) => itemFor(ctx, m, item._id, TODAY));
+    expect(sheet!.targets.map((x) => [x.date, x.current, x.block])).toEqual([
+      ["2026-11-16", true, null],
+      ["2026-11-18", false, "afterMeal"],
+      ["2026-11-20", false, "afterMeal"],
+    ]);
+  });
+
+  test("a pinned item is unpinned and re-flowed when its trip no longer serves the meal", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-19");
+    await regen(t, m);
+    const t16 = await tripOn(t, "2026-11-16");
+    const t18 = await tripOn(t, "2026-11-18");
+    const [item] = await allItems(t);
+    await t.run((ctx) => moveItemFor(ctx, m, { itemId: item._id, tripId: t16._id }, TODAY));
+    // Move the pinned trip past the meal: the item flows back to the latest trip before it.
+    await t.run((ctx) => moveTripFor(ctx, m, { tripId: t16._id, date: "2026-11-21" }, TODAY));
+    const items = await allItems(t);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ trip: t18._id, pinned: false, amount: 500 });
+  });
+
+  test("a pinned item is re-flowed when its meal is gone", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    const a = await meal(t, m, r, "2026-11-19");
+    await meal(t, m, r, "2026-11-21");
+    await regen(t, m);
+    const t16 = await tripOn(t, "2026-11-16");
+    const item = (await allItems(t)).find((i) => i.sourceMeals.includes(a))!;
+    await t.run((ctx) => moveItemFor(ctx, m, { itemId: item._id, tripId: t16._id }, TODAY));
+    await t.run((ctx) => ctx.db.delete("plannedMeals", a));
+    await regen(t, m);
+    const items = await allItems(t);
+    expect(items.every((i) => !i.pinned && i.trip !== t16._id)).toBe(true);
+    expect(items).toHaveLength(1);
+  });
+
+  test("a Rohlík trip serves Dinner on its day but not Lunch", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-18", 4, "lunch");
+    await meal(t, m, r, "2026-11-18", 4, "dinner");
+    await regen(t, m);
+    const t18 = await tripOn(t, "2026-11-18");
+    await t.run((ctx) => setTripKindFor(ctx, m, { tripId: t18._id, kind: "rohlik" }, TODAY));
+    const { trips: listed } = await list(t, m);
+    expect(listed.map((x) => [x.date, x.kind, x.items.map((i) => i.amount)])).toEqual([
+      ["2026-11-16", "store", [500]],
+      ["2026-11-18", "rohlik", [500]],
+    ]);
+  });
+
+  test("an added trip takes items; a second trip on a day gets only manual and moved ones", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-17");
+    await regen(t, m);
+    expect((await trips(t)).map((x) => x.date)).toEqual(["2026-11-16"]);
+    await expect(
+      t.run((ctx) => addTripFor(ctx, m, { date: "2026-11-15", kind: "store" }, TODAY)),
+    ).rejects.toThrow(/DATE_PAST/);
+    await expect(
+      t.run((ctx) => addTripFor(ctx, m, { date: "2026-02-30", kind: "store" }, TODAY)),
+    ).rejects.toThrow(/INVALID_DATE/);
+
+    const t17 = await t.run((ctx) => addTripFor(ctx, m, { date: "2026-11-17", kind: "rohlik" }, TODAY));
+    // Rohlík on 17 can't serve Lunch on 17: the item stays on 16.
+    expect((await allItems(t)).map((i) => i.trip)).toEqual([(await tripOn(t, "2026-11-16"))._id]);
+    await t.run((ctx) => setTripKindFor(ctx, m, { tripId: t17, kind: "store" }, TODAY));
+    expect((await allItems(t)).map((i) => i.trip)).toEqual([t17]);
+
+    const second = await t.run((ctx) => addTripFor(ctx, m, { date: "2026-11-17", kind: "store" }, TODAY));
+    expect((await allItems(t)).map((i) => i.trip)).toEqual([t17]);
+    const [item] = await allItems(t);
+    await t.run((ctx) => moveItemFor(ctx, m, { itemId: item._id, tripId: second }, TODAY));
+    await regen(t, m);
+    expect(await allItems(t)).toMatchObject([{ trip: second, pinned: true }]);
+  });
+
+  test("a deleted trip stays deleted; moving and deleting need nothing ticked", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-16");
+    await meal(t, m, r, "2026-11-18");
+    await regen(t, m);
+    const t16 = await tripOn(t, "2026-11-16");
+    const t18 = await tripOn(t, "2026-11-18");
+    await t.run((ctx) => addManualItemFor(ctx, m, { tripId: t18._id, label: "jar" }, TODAY));
+    await t.run((ctx) => deleteTripFor(ctx, m, { tripId: t18._id }, TODAY));
+    // The last trip isn't recreated; its meal falls back to the trip before.
+    expect((await trips(t)).map((x) => x.date)).toEqual(["2026-11-16"]);
+    const items = await allItems(t);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ trip: t16._id, amount: 1000 });
+
+    await t.run((ctx) => setCheckedFor(ctx, m, { itemId: items[0]._id, checked: true }));
+    await expect(
+      t.run((ctx) => moveTripFor(ctx, m, { tripId: t16._id, date: "2026-11-17" }, TODAY)),
+    ).rejects.toThrow(/TRIP_HAS_CHECKED/);
+    await expect(t.run((ctx) => deleteTripFor(ctx, m, { tripId: t16._id }, TODAY))).rejects.toThrow(
+      /TRIP_HAS_CHECKED/,
+    );
+    expect((await list(t, m)).trips[0].lock).toBe("checked");
+    // A past trip can't be moved either.
+    await expect(
+      t.run((ctx) => moveTripFor(ctx, m, { tripId: t16._id, date: "2026-11-20" }, "2026-11-17")),
+    ).rejects.toThrow(/TRIP_PAST/);
+  });
+
+  test("a done trip keeps its unticked items but takes no new ones", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const beef = await ingredient(t, m, "hovězí");
+    const onion = await ingredient(t, m, "cibule", { measureKind: "count" });
+    const r1 = await recipe(t, m, [{ ingredient: beef, amount: 500, unit: "g" }], 4);
+    const r2 = await recipe(t, m, [{ ingredient: onion, amount: 1 }], 4);
+    const id = await meal(t, m, r1, "2026-11-19");
+    await regen(t, m);
+    const t18 = await tripOn(t, "2026-11-18");
+    await t.run((ctx) => setTripStatusFor(ctx, m, { tripId: t18._id, status: "done" }, TODAY));
+    // The unbought beef stays on the done trip and still follows the plan.
+    await t.run((ctx) => ctx.db.patch("plannedMeals", id, { portions: 8 }));
+    await meal(t, m, r2, "2026-11-19");
+    await regen(t, m);
+    const items = await allItems(t);
+    expect(items.find((i) => i.label === "hovězí")).toMatchObject({ trip: t18._id, amount: 1000, pinned: false });
+    // New onions go to the open trip before it.
+    expect(items.find((i) => i.label === "cibule")!.trip).toBe((await tripOn(t, "2026-11-16"))._id);
+    await expect(
+      t.run((ctx) =>
+        moveItemFor(ctx, m, { itemId: items.find((i) => i.label === "cibule")!._id, tripId: t18._id }, TODAY),
+      ),
+    ).rejects.toThrow(/TRIP_DONE/);
+    // Reopened, it takes items again.
+    await t.run((ctx) => setTripStatusFor(ctx, m, { tripId: t18._id, status: "planned" }, TODAY));
+    expect((await allItems(t)).every((i) => i.trip === t18._id)).toBe(true);
+  });
+
+  test("changing the trip interval affects only trips created afterwards", async () => {
+    const t = convexTest(schema, modules);
+    const { m, r } = await setup(t);
+    await meal(t, m, r, "2026-11-18");
+    await regen(t, m);
+    expect((await trips(t)).map((x) => x.date)).toEqual(["2026-11-16", "2026-11-18"]);
+    await expect(t.run((ctx) => setTripIntervalFor(ctx, m.household, 0))).rejects.toThrow(/INVALID_DAYS/);
+    await t.run((ctx) => setTripIntervalFor(ctx, m.household, 4));
+    await meal(t, m, r, "2026-11-23");
+    await regen(t, m);
+    expect((await trips(t)).map((x) => x.date)).toEqual(["2026-11-16", "2026-11-18", "2026-11-22"]);
   });
 });

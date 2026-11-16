@@ -150,7 +150,8 @@ export type TripLike = { date: CalendarDay; kind: "store" | "rohlik"; status: "p
 /**
  * Dates of the default trips to create (#7): every `interval` days after the
  * last existing trip (or from today when there is none or it's past), up to
- * the last Planned Meal. Never fills gaps before the last trip.
+ * the last Planned Meal. Never fills gaps before the last trip. `existing`
+ * may include dates of deleted or moved trips, so those gaps stay too.
  */
 export function newTripDates(
   existing: CalendarDay[],
@@ -205,6 +206,46 @@ export function tripFor<T extends TripLike>(
     if (t.status === "planned" && canServe(t, meal)) return t;
   }
   return undefined;
+}
+
+// ---------- trip management (#30) ----------
+
+/** Longest Manual Shopping Item label. */
+export const MAX_MANUAL_LABEL = 80;
+
+/** How far ahead a trip can be added or moved to. */
+export const MAX_TRIP_DAYS_AHEAD = 365;
+
+/** Why an item can't go to a trip ("Nakoupit při nákupu" chips), or null when it can. */
+export type MoveBlock = "done" | "past" | "afterMeal";
+
+/**
+ * Whether an item can be moved to `trip` (#7, #10): the trip is open and not
+ * past, and for a generated item it can still supply every meal it's for
+ * (trips after the meal are "až po jídle"). Manual items go anywhere open.
+ */
+export function moveBlock(
+  trip: TripLike,
+  item: { manual: boolean; meals: { date: CalendarDay; slot: "lunch" | "dinner" | "special" }[] },
+  today: CalendarDay,
+): MoveBlock | null {
+  if (trip.status === "done") return "done";
+  if (trip.date < today) return "past";
+  if (!item.manual && !item.meals.every((m) => canServe(trip, m))) return "afterMeal";
+  return null;
+}
+
+/** Why a trip can't be moved or deleted, or null when it can (#7). */
+export type TripLock = "past" | "checked";
+
+export function tripLock(
+  trip: { date: CalendarDay },
+  items: { checked: boolean }[],
+  today: CalendarDay,
+): TripLock | null {
+  if (trip.date < today) return "past";
+  if (items.some((i) => i.checked)) return "checked";
+  return null;
 }
 
 // ---------- frozen ticks (#28) ----------

@@ -7,6 +7,8 @@ import { invitePath } from "@convex/lib/inviteCode";
 import { APP_TIME_ZONE } from "@convex/lib/dates";
 import { rememberMember } from "~/pwa";
 import { FreshnessCard } from "~/components/settings/Freshness";
+import { MAX_TRIP_INTERVAL_DAYS, MIN_TRIP_INTERVAL_DAYS } from "@convex/lib/shopping";
+import { everyDays } from "~/lib/shopping";
 
 export const Route = createFileRoute("/nastaveni/")({ component: Settings });
 
@@ -18,6 +20,7 @@ function Settings() {
       <Members />
       <InviteCard />
       <DefaultPortions />
+      <TripInterval />
       <IngredientsCard />
       <FreshnessCard />
       <button
@@ -224,6 +227,59 @@ function DefaultPortions() {
             type="button"
             aria-label="Více porcí"
             disabled={busy || household.defaultPortions >= 20}
+            onClick={() => change(1)}
+          >
+            +
+          </button>
+        </span>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+/** "Jak často nakupovat" (#7, #30): days between default Shopping Trips. */
+function TripInterval() {
+  const household = useQuery(api.households.current);
+  const setTripInterval = useMutation(api.households.setTripInterval);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function change(by: number) {
+    if (!household) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await setTripInterval({ days: household.tripIntervalDays + by });
+    } catch {
+      setError("Nepodařilo se uložit.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Jak často nakupovat</h2>
+      <p className="muted small">
+        {household ? `Nový nákup se vytvoří ${everyDays(household.tripIntervalDays)}. ` : ""}
+        Změna platí jen pro nákupy vytvořené odteď; ty stávající zůstanou, jak jsou.
+      </p>
+      {household && (
+        <span className="stepper">
+          <button
+            type="button"
+            aria-label="Častěji"
+            disabled={busy || household.tripIntervalDays <= MIN_TRIP_INTERVAL_DAYS}
+            onClick={() => change(-1)}
+          >
+            −
+          </button>
+          <output aria-live="polite">{household.tripIntervalDays}</output>
+          <button
+            type="button"
+            aria-label="Méně často"
+            disabled={busy || household.tripIntervalDays >= MAX_TRIP_INTERVAL_DAYS}
             onClick={() => change(1)}
           >
             +

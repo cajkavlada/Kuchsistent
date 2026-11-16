@@ -1,14 +1,18 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { today as pragueToday, type CalendarDay } from "./lib/dates";
+import { addDays, isCalendarDay, today as pragueToday, type CalendarDay } from "./lib/dates";
 import { freshnessDaysFor, type FreshnessClass, type StoreSection } from "./lib/ingredients";
 import { assertSameHousehold, requireMember, type Member } from "./lib/membership";
 import {
+  canServe,
   DEFAULT_TRIP_INTERVAL_DAYS,
   diffParts,
   formatParts,
   freshnessWarning,
+  MAX_MANUAL_LABEL,
+  MAX_TRIP_DAYS_AHEAD,
+  moveBlock,
   NOT_NEEDED,
   newTripDates,
   portionsPhrase,
@@ -17,6 +21,7 @@ import {
   scaleFactor,
   totalOf,
   tripFor,
+  tripLock,
   type Need,
   type Part,
 } from "./lib/shopping";
@@ -25,7 +30,9 @@ import {
  * The shopping list (#27, #28; decisions #5, #6, #7, #10, #13): Shopping Trips
  * and their Shopping Items, regenerated from the Planned Meals (with their
  * Leftover Portions) whenever anything they depend on changes. Plenty,
- * Optional Lines, freshness warnings and the item sheet are #29.
+ * Optional Lines, freshness warnings and the item sheet are #29; adding,
+ * moving, deleting and closing trips, moving items and Manual Shopping Items
+ * are #30.
  */
 
 // ---------- regeneration ----------
@@ -65,7 +72,12 @@ const partsOf = (i: Doc<"shoppingItems">): Part[] =>
  *   Ingredient. When that need rises, a top-up item is added for the
  *   difference; when it drops, the checked item gets an "už nepotřeba" note.
  * - Unchecked items on past trips move to the meal's trip or are dropped.
- * - Manual and pinned items are never touched.
+ * - Pinned items (moved by hand) stay on their trip, with their amount
+ *   updated, for the meals that still exist and that the trip can still
+ *   serve; with none left they are unpinned and re-flowed (#7, #30). An
+ *   unchecked item on a done trip is held there the same way, since a done
+ *   trip takes no new items.
+ * - Manual items are never touched.
  */
 export async function regenerateShopping(
   ctx: MutationCtx,
@@ -105,7 +117,9 @@ export async function regenerateShopping(
     .withIndex("by_household_date", (q) => q.eq("household", household))
     .collect();
   const lastMeal = meals.length ? meals[meals.length - 1].date : undefined;
-  for (const date of newTripDates(trips.map((t) => t.date), lastMeal, today, interval)) {
+  const known = trips.map((t) => t.date);
+  if (doc.tripsThrough) known.push(doc.tripsThrough);
+  for (const date of newTripDates(known, lastMeal, today, interval)) {
     const id = await ctx.db.insert("shoppingTrips", { household, date, kind: "store", status: "planned" });
     trips.push((await ctx.db.get("shoppingTrips", id))!);
   }
@@ -218,7 +232,54 @@ export async function regenerateShopping(
     desired.set(key, d);
   }
 
-  // Everything not covered by a tick goes to its meal's trip.
+  // Items held on their trip: pinned (moved by hand) or left on a done trip.
+  const tripById = new Map(trips.map((tr) => [tr._id, tr]));
+  const held = new Set<string>();
+  const heldFields = new Map<Id<"shoppingItems">, ReturnType<typeof itemFields>>();
+  for (const item of items) {
+    if (item.manual || item.checked || item.topUp || !item.ingredient) continue;
+    const trip = tripById.get(item.trip);
+    if (!trip || (!item.pinned && trip.status !== "done")) continue;
+    const ing = item.ingredient;
+    const kept: Id<"plannedMeals">[] = [];
+    const itemNeeds: Need[] = [];
+    let optional = true;
+    let ingredient: Doc<"ingredients"> | undefined;
+    for (const id of trip.date >= today ? item.sourceMeals : []) {
+      const meal = ahead.get(id);
+      const key = `${id}|${ing}`;
+      if (!meal || covered.has(key) || held.has(key) || !canServe(trip, meal)) continue;
+      const e = (await needsOf(meal)).get(ing);
+      if (!e) continue;
+      kept.push(id);
+      itemNeeds.push(...e.needs);
+      optional &&= e.optional;
+      ingredient = e.ingredient;
+    }
+    if (!ingredient) {
+      // Nothing left to hold it: unpin and let it flow like any other item.
+      if (item.pinned) {
+        await ctx.db.patch("shoppingItems", item._id, { pinned: false });
+        item.pinned = false;
+      }
+      continue;
+    }
+    for (const id of kept) held.add(`${id}|${ing}`);
+    heldFields.set(
+      item._id,
+      itemFields({
+        trip: trip._id,
+        ingredient: ing,
+        label: ingredient.name,
+        parts: totalOf(ingredient.measureKind, itemNeeds),
+        sourceMeals: kept,
+        topUp: false,
+        optional,
+      }),
+    );
+  }
+
+  // Everything not covered by a tick or held on a trip goes to its meal's trip.
   const needs = new Map<
     string,
     {
@@ -233,7 +294,7 @@ export async function regenerateShopping(
     const trip = tripOf(meal);
     if (!trip) continue;
     for (const [ing, e] of await needsOf(meal)) {
-      if (covered.has(`${meal._id}|${ing}`)) continue;
+      if (covered.has(`${meal._id}|${ing}`) || held.has(`${meal._id}|${ing}`)) continue;
       const key = itemKey(trip._id, ing, false);
       const entry = needs.get(key) ?? {
         trip: trip._id,
@@ -262,7 +323,12 @@ export async function regenerateShopping(
   }
 
   for (const item of items) {
-    if (item.manual || item.checked || item.pinned) continue;
+    if (item.manual || item.checked) continue;
+    const hold = heldFields.get(item._id);
+    if (hold) {
+      if (!sameFields(item, hold)) await ctx.db.patch("shoppingItems", item._id, hold);
+      continue;
+    }
     const key = itemKey(item.trip, item.ingredient, item.topUp);
     const want = desired.get(key);
     if (!want) {
@@ -411,6 +477,7 @@ export async function listFor(ctx: QueryCtx, member: Member, today: CalendarDay 
         moreAmounts: i.moreAmounts,
         checked: i.checked,
         manual: i.manual,
+        pinned: i.pinned,
         note: i.note,
         topUp: i.topUp ?? false,
         storeSection: (ing?.storeSection ?? "other") as StoreSection,
@@ -422,7 +489,15 @@ export async function listFor(ctx: QueryCtx, member: Member, today: CalendarDay 
             : await warningFor(cache, household?.freshnessDays, ing.freshnessClass, trip.date, i.sourceMeals),
       });
     }
-    result.push({ _id: trip._id, date: trip.date, kind: trip.kind, status: trip.status, items });
+    result.push({
+      _id: trip._id,
+      date: trip.date,
+      kind: trip.kind,
+      status: trip.status,
+      /** Why it can't be moved or deleted (#30), or null. */
+      lock: tripLock(trip, rows, today),
+      items,
+    });
   }
   return { today, trips: result };
 }
@@ -468,7 +543,12 @@ export const item = query({
   handler: async (ctx, { itemId }) => itemFor(ctx, await requireMember(ctx), itemId),
 });
 
-export async function itemFor(ctx: QueryCtx, member: Member, itemId: Id<"shoppingItems">) {
+export async function itemFor(
+  ctx: QueryCtx,
+  member: Member,
+  itemId: Id<"shoppingItems">,
+  today: CalendarDay = pragueToday(),
+) {
   const i = await ctx.db.get("shoppingItems", itemId);
   if (i === null || i.household !== member.household) return null;
   const trip = await ctx.db.get("shoppingTrips", i.trip);
@@ -499,6 +579,27 @@ export async function itemFor(ctx: QueryCtx, member: Member, itemId: Id<"shoppin
   sources.sort((a, b) => a.date.localeCompare(b.date) || a.slot.localeCompare(b.slot));
   const plenty = !i.manual && ing?.plenty === true;
   const freshDays = ing ? freshnessDaysFor(household?.freshnessDays, ing.freshnessClass) : null;
+
+  // "Nakoupit při nákupu" (#30): trips from today on; ticked items and top-ups don't move.
+  const targets = [];
+  if (!i.checked && !i.topUp) {
+    const trips = await ctx.db
+      .query("shoppingTrips")
+      .withIndex("by_household_date", (q) => q.eq("household", member.household).gte("date", today))
+      .collect();
+    if (!trips.some((tr) => tr._id === trip._id)) trips.unshift(trip);
+    for (const tr of trips) {
+      const current = tr._id === trip._id;
+      targets.push({
+        _id: tr._id,
+        date: tr.date,
+        kind: tr.kind,
+        current,
+        block: current ? null : moveBlock(tr, { manual: i.manual, meals: sources }, today),
+      });
+    }
+  }
+
   return {
     _id: i._id,
     label: i.label,
@@ -507,12 +608,14 @@ export async function itemFor(ctx: QueryCtx, member: Member, itemId: Id<"shoppin
     moreAmounts: i.moreAmounts,
     checked: i.checked,
     manual: i.manual,
+    pinned: i.pinned,
     topUp: i.topUp ?? false,
     optional: i.optional === true,
     note: i.note,
     /** "už nepotřeba" for the whole item (not just part of it): it can be deleted. */
     notNeeded: i.note === NOT_NEEDED,
     trip: { _id: trip._id, date: trip.date, kind: trip.kind },
+    targets,
     ingredient: ing
       ? {
           _id: ing._id,
@@ -535,9 +638,10 @@ export async function itemFor(ctx: QueryCtx, member: Member, itemId: Id<"shoppin
 // ---------- removing ----------
 
 /**
- * "Smazat" on the item sheet (#29): removes an item whose meals no longer
- * need any of it (note exactly "už nepotřeba", #28). An item that's only
- * partly unneeded ("už nepotřeba: 200 g") still covers a meal and stays.
+ * "Smazat" on the item sheet (#29, #30): removes a Manual Shopping Item, or
+ * an item whose meals no longer need any of it (note exactly "už
+ * nepotřeba", #28). An item that's only partly unneeded ("už nepotřeba:
+ * 200 g") still covers a meal and stays.
  */
 export const removeItem = mutation({
   args: { itemId: v.id("shoppingItems") },
@@ -553,7 +657,7 @@ export async function removeItemFor(
   const item = await ctx.db.get("shoppingItems", itemId);
   if (item === null) return null; // already gone: nothing to do
   assertSameHousehold(member, item);
-  if (item.note !== NOT_NEEDED) throw new ConvexError({ code: "ITEM_NOT_REMOVABLE" });
+  if (!item.manual && item.note !== NOT_NEEDED) throw new ConvexError({ code: "ITEM_NOT_REMOVABLE" });
   await ctx.db.delete("shoppingItems", itemId);
   return null;
 }
@@ -578,5 +682,234 @@ export async function setCheckedFor(
   const item = await ctx.db.get("shoppingItems", itemId);
   if (item === null || item.household !== member.household) return null;
   if (item.checked !== checked) await ctx.db.patch("shoppingItems", itemId, { checked });
+  return null;
+}
+
+// ---------- Manual Shopping Items and moving (#30) ----------
+
+/** A trip of the caller's Household that can take new items: open and not past. */
+async function openTrip(ctx: QueryCtx, member: Member, tripId: Id<"shoppingTrips">, today: CalendarDay) {
+  const trip = await ctx.db.get("shoppingTrips", tripId);
+  assertSameHousehold(member, trip);
+  if (trip.status === "done") throw new ConvexError({ code: "TRIP_DONE" });
+  if (trip.date < today) throw new ConvexError({ code: "TRIP_PAST" });
+  return trip;
+}
+
+/**
+ * The "add your own item" field (#10, #30): a Manual Shopping Item on the
+ * trip. Regeneration never touches it.
+ */
+export const addManualItem = mutation({
+  args: { tripId: v.id("shoppingTrips"), label: v.string() },
+  returns: v.id("shoppingItems"),
+  handler: async (ctx, args) => addManualItemFor(ctx, await requireMember(ctx), args),
+});
+
+export async function addManualItemFor(
+  ctx: MutationCtx,
+  member: Member,
+  { tripId, label }: { tripId: Id<"shoppingTrips">; label: string },
+  today: CalendarDay = pragueToday(),
+): Promise<Id<"shoppingItems">> {
+  const name = label.trim().replace(/\s+/g, " ");
+  if (name === "" || name.length > MAX_MANUAL_LABEL) throw new ConvexError({ code: "INVALID_LABEL" });
+  const trip = await openTrip(ctx, member, tripId, today);
+  return await ctx.db.insert("shoppingItems", {
+    household: member.household,
+    trip: trip._id,
+    label: name,
+    checked: false,
+    manual: true,
+    sourceMeals: [],
+    pinned: false,
+  });
+}
+
+/**
+ * "Nakoupit při nákupu" on the item sheet (#10, #30): moves an unticked item
+ * to another open trip. A generated item can't go to a trip after one of its
+ * meals and is pinned there (see `regenerateShopping`).
+ */
+export const moveItem = mutation({
+  args: { itemId: v.id("shoppingItems"), tripId: v.id("shoppingTrips") },
+  returns: v.null(),
+  handler: async (ctx, args) => moveItemFor(ctx, await requireMember(ctx), args),
+});
+
+export async function moveItemFor(
+  ctx: MutationCtx,
+  member: Member,
+  { itemId, tripId }: { itemId: Id<"shoppingItems">; tripId: Id<"shoppingTrips"> },
+  today: CalendarDay = pragueToday(),
+): Promise<null> {
+  const item = await ctx.db.get("shoppingItems", itemId);
+  assertSameHousehold(member, item);
+  if (item.trip === tripId) return null;
+  if (item.checked || item.topUp) throw new ConvexError({ code: "ITEM_NOT_MOVABLE" });
+  const trip = await openTrip(ctx, member, tripId, today);
+  if (item.manual) {
+    await ctx.db.patch("shoppingItems", itemId, { trip: tripId });
+    return null;
+  }
+  const meals = [];
+  for (const id of item.sourceMeals) {
+    const meal = await ctx.db.get("plannedMeals", id);
+    if (meal) meals.push(meal);
+  }
+  if (moveBlock(trip, { manual: false, meals }, today) === "afterMeal") {
+    throw new ConvexError({ code: "TRIP_AFTER_MEAL" });
+  }
+  await ctx.db.patch("shoppingItems", itemId, { trip: tripId, pinned: true });
+  await regenerateShopping(ctx, member.household, today);
+  return null;
+}
+
+// ---------- trips (#30) ----------
+
+const vKind = v.union(v.literal("store"), v.literal("rohlik"));
+
+function validTripDate(date: string, today: CalendarDay) {
+  if (!isCalendarDay(date) || date > addDays(today, MAX_TRIP_DAYS_AHEAD)) {
+    throw new ConvexError({ code: "INVALID_DATE" });
+  }
+  if (date < today) throw new ConvexError({ code: "DATE_PAST" });
+}
+
+/** Remembers a date a trip was on, so default trips aren't created up to it again (#7). */
+async function rememberTripDate(ctx: MutationCtx, household: Id<"households">, date: CalendarDay) {
+  const doc = await ctx.db.get("households", household);
+  if (doc && (doc.tripsThrough === undefined || doc.tripsThrough < date)) {
+    await ctx.db.patch("households", household, { tripsThrough: date });
+  }
+}
+
+/** A trip of the caller's Household that can be moved or deleted: not past, nothing ticked. */
+async function unlockedTrip(ctx: QueryCtx, member: Member, tripId: Id<"shoppingTrips">, today: CalendarDay) {
+  const trip = await ctx.db.get("shoppingTrips", tripId);
+  assertSameHousehold(member, trip);
+  const items = await ctx.db
+    .query("shoppingItems")
+    .withIndex("by_trip", (q) => q.eq("trip", tripId))
+    .collect();
+  const lock = tripLock(trip, items, today);
+  if (lock === "past") throw new ConvexError({ code: "TRIP_PAST" });
+  if (lock === "checked") throw new ConvexError({ code: "TRIP_HAS_CHECKED" });
+  return { trip, items };
+}
+
+/**
+ * The "+" tab (#30): a trip on a chosen day, from today on. A second trip on
+ * a day that already has one gets only manual and moved items (#7).
+ */
+export const addTrip = mutation({
+  args: { date: v.string(), kind: vKind },
+  returns: v.id("shoppingTrips"),
+  handler: async (ctx, args) => addTripFor(ctx, await requireMember(ctx), args),
+});
+
+export async function addTripFor(
+  ctx: MutationCtx,
+  member: Member,
+  { date, kind }: { date: string; kind: "store" | "rohlik" },
+  today: CalendarDay = pragueToday(),
+): Promise<Id<"shoppingTrips">> {
+  validTripDate(date, today);
+  const id = await ctx.db.insert("shoppingTrips", {
+    household: member.household,
+    date,
+    kind,
+    status: "planned",
+  });
+  await regenerateShopping(ctx, member.household, today);
+  return id;
+}
+
+/** "Přesunout" in the trip menu (#30): a new date, while nothing on it is ticked. */
+export const moveTrip = mutation({
+  args: { tripId: v.id("shoppingTrips"), date: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => moveTripFor(ctx, await requireMember(ctx), args),
+});
+
+export async function moveTripFor(
+  ctx: MutationCtx,
+  member: Member,
+  { tripId, date }: { tripId: Id<"shoppingTrips">; date: string },
+  today: CalendarDay = pragueToday(),
+): Promise<null> {
+  validTripDate(date, today);
+  const { trip } = await unlockedTrip(ctx, member, tripId, today);
+  if (trip.date === date) return null;
+  await rememberTripDate(ctx, member.household, trip.date);
+  await ctx.db.patch("shoppingTrips", tripId, { date });
+  await regenerateShopping(ctx, member.household, today);
+  return null;
+}
+
+/**
+ * "Smazat" in the trip menu (#30): removes the trip with its items, while
+ * nothing on it is ticked. Generated items re-flow to other trips; the
+ * trip's date is remembered so it isn't created again.
+ */
+export const deleteTrip = mutation({
+  args: { tripId: v.id("shoppingTrips") },
+  returns: v.null(),
+  handler: async (ctx, args) => deleteTripFor(ctx, await requireMember(ctx), args),
+});
+
+export async function deleteTripFor(
+  ctx: MutationCtx,
+  member: Member,
+  { tripId }: { tripId: Id<"shoppingTrips"> },
+  today: CalendarDay = pragueToday(),
+): Promise<null> {
+  const { trip, items } = await unlockedTrip(ctx, member, tripId, today);
+  for (const i of items) await ctx.db.delete("shoppingItems", i._id);
+  await ctx.db.delete("shoppingTrips", tripId);
+  await rememberTripDate(ctx, member.household, trip.date);
+  await regenerateShopping(ctx, member.household, today);
+  return null;
+}
+
+/** Obchod / Rohlík in the trip menu (#7, #30). A Rohlík trip serves Dinner on its day, not Lunch. */
+export const setTripKind = mutation({
+  args: { tripId: v.id("shoppingTrips"), kind: vKind },
+  returns: v.null(),
+  handler: async (ctx, args) => setTripKindFor(ctx, await requireMember(ctx), args),
+});
+
+export async function setTripKindFor(
+  ctx: MutationCtx,
+  member: Member,
+  { tripId, kind }: { tripId: Id<"shoppingTrips">; kind: "store" | "rohlik" },
+  today: CalendarDay = pragueToday(),
+): Promise<null> {
+  const trip = await ctx.db.get("shoppingTrips", tripId);
+  assertSameHousehold(member, trip);
+  if (trip.kind === kind) return null;
+  await ctx.db.patch("shoppingTrips", tripId, { kind });
+  await regenerateShopping(ctx, member.household, today);
+  return null;
+}
+
+/** "Označit jako hotový" / "Znovu otevřít" (#10, #30). A done trip takes no new items. */
+export const setTripStatus = mutation({
+  args: { tripId: v.id("shoppingTrips"), status: v.union(v.literal("planned"), v.literal("done")) },
+  returns: v.null(),
+  handler: async (ctx, args) => setTripStatusFor(ctx, await requireMember(ctx), args),
+});
+
+export async function setTripStatusFor(
+  ctx: MutationCtx,
+  member: Member,
+  { tripId, status }: { tripId: Id<"shoppingTrips">; status: "planned" | "done" },
+  today: CalendarDay = pragueToday(),
+): Promise<null> {
+  const trip = await ctx.db.get("shoppingTrips", tripId);
+  assertSameHousehold(member, trip);
+  if (trip.status === status) return null;
+  await ctx.db.patch("shoppingTrips", tripId, { status });
+  await regenerateShopping(ctx, member.household, today);
   return null;
 }

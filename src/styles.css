@@ -514,3 +514,16 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .why.delta { background: #dcfce7; color: var(--green); }
 .why-list { list-style: none; margin: 0; padding: 10px 12px; border-radius: 10px; background: #f1eee8; display: flex; flex-direction: column; gap: 6px; font-size: .9rem; }
 .plenty-toggle { border-top: 1px solid var(--line); padding-top: 10px; }
+
+/* Trip management, moving items and manual items (#30) */
+.trip-tab.add { min-width: 52px; justify-content: center; font-size: 1.3rem; color: var(--fg); border-style: dashed; }
+.trip-head .icon-btn.small { width: 40px; height: 40px; font-size: 1.2rem; color: var(--fg); }
+.additem { display: flex; flex-wrap: wrap; gap: 6px; }
+.additem .finput { flex: 1; min-width: 0; }
+.additem .btn { width: auto; min-height: 44px; }
+.additem .error { flex-basis: 100%; margin: 0; }
+.bd.pin { background: #e0f2fe; color: #075985; }
+.bd.man { background: #ede9fe; color: #6d28d9; }
+.chip.rl.on { background: #7c3aed; border-color: #7c3aed; }
+.chip:disabled { opacity: .45; }
+.why.gone p { margin: 0 0 8px; }

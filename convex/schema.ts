@@ -26,6 +26,11 @@ export default defineSchema({
     freshnessDays: v.optional(vFreshnessDays),
     /** Days between default Shopping Trips (#7); unset = 2. */
     tripIntervalDays: v.optional(v.number()),
+    /**
+     * Latest date a trip was deleted or moved away from (#7, #30). Default
+     * trips are only created after it, so a deleted trip stays deleted.
+     */
+    tripsThrough: v.optional(v.string()),
   }),
 
   /** A user belongs to exactly one Household (#11). */
@@ -196,7 +201,8 @@ export default defineSchema({
 
   /**
    * A Shopping Trip (#5, #7): a dated in-store run or Rohlík delivery on a
-   * Prague day. Default trips are created by regeneration (`convex/shopping.ts`).
+   * Prague day. Default trips are created by regeneration (`convex/shopping.ts`);
+   * Members add, move, delete, switch and close them in Nákup (#30).
    */
   shoppingTrips: defineTable({
     household: v.id("households"),
@@ -211,7 +217,8 @@ export default defineSchema({
    * while unchecked; Manual Shopping Items have no Ingredient or sources.
    * `amount`/`unit` is the total in a base unit (g, ml, ks) or a unit that
    * doesn't convert; `moreAmounts` holds clashing kinds ("+ 1 hrnek", #6).
-   * No amount = vague ("—"). Checked items are frozen (#28): `topUp` marks
+   * No amount = vague ("—"). `pinned`: moved to its trip by hand (#30); it
+   * stays there while it can still serve its meals. Checked items are frozen (#28): `topUp` marks
    * an item bought on top of them when the need rose (amount = the
    * difference, `note` "navýšení: …"); `note` "už nepotřeba…" marks a checked
    * item whose meals need less or nothing now.
