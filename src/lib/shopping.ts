@@ -1,5 +1,6 @@
+import { ConvexError } from "convex/values";
 import { daysLabel, STORE_SECTIONS, type StoreSection } from "@convex/lib/ingredients";
-import { formatParts, NOT_NEEDED, type Part } from "@convex/lib/shopping";
+import { formatParts, NOT_NEEDED, type MoveBlock, type Part, type TripLock } from "@convex/lib/shopping";
 
 /** What the list needs of a Shopping Item. */
 export type ListItem = {
@@ -70,4 +71,48 @@ export function freshBadge(w: { gap: number; max: number }): string {
 /** Item sheet: why the warning is there. */
 export function freshExplanation(w: { gap: number; max: number }, className: string): string {
   return `Kupuješ ${daysLabel(w.gap)} před jídlem, ale „${className}" vydrží jen ${daysLabel(w.max)}. Je to jen upozornění – položka na seznamu zůstává.`;
+}
+
+// ---------- trip management (#30) ----------
+
+/** "každý den", "každé 2 dny", "každých 5 dní". */
+export function everyDays(n: number): string {
+  if (n === 1) return "každý den";
+  return n >= 2 && n <= 4 ? `každé ${n} dny` : `každých ${n} dní`;
+}
+
+/** Why a "Nakoupit při nákupu" chip is disabled. */
+export const MOVE_BLOCK_LABEL: Record<MoveBlock, string> = {
+  done: "hotový",
+  past: "proběhl",
+  afterMeal: "až po jídle",
+};
+
+/** Why a trip can't be moved or deleted (trip menu). */
+export const TRIP_LOCK_LABEL: Record<TripLock, string> = {
+  checked: "Nákup už má odškrtnuté položky, takže ho nejde přesunout ani smazat.",
+  past: "Nákup už proběhl, takže ho nejde přesunout ani smazat.",
+};
+
+const ERRORS: Record<string, string> = {
+  TRIP_DONE: "Nákup je hotový a nové položky nebere. Nejdřív ho znovu otevři.",
+  TRIP_PAST: "Ten nákup už proběhl.",
+  TRIP_HAS_CHECKED: "Nákup už má odškrtnuté položky.",
+  TRIP_AFTER_MEAL: "Ten nákup je až po jídle.",
+  ITEM_NOT_MOVABLE: "Tuhle položku přesunout nejde.",
+  ITEM_NOT_REMOVABLE: "Tuhle položku smazat nejde.",
+  INVALID_LABEL: "Napiš, co koupit (nejvýš 80 znaků).",
+  INVALID_DATE: "Tohle datum nejde použít.",
+  DATE_PAST: "Datum nesmí být v minulosti.",
+  NOT_FOUND: "Nákup nebo položka už neexistuje.",
+};
+
+/** Czech message for a shopping mutation's error code. */
+export function shoppingError(code: string | undefined, fallback: string): string {
+  return (code && ERRORS[code]) || fallback;
+}
+
+/** The `code` of a ConvexError, if it is one. */
+export function errorCode(e: unknown): string | undefined {
+  return e instanceof ConvexError ? (e.data as { code?: string }).code : undefined;
 }

@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   canServe,
   diffParts,
+  moveBlock,
+  tripLock,
   freshnessWarning,
   portionsPhrase,
   sumParts,
@@ -187,4 +189,34 @@ test("freshnessWarning: furthest meal more days away than the class allows", () 
   expect(freshnessWarning("2026-11-16", ["2026-11-18"], 2)).toBeNull();
   expect(freshnessWarning("2026-11-16", ["2026-11-30"], null)).toBeNull();
   expect(freshnessWarning("2026-11-16", [], 1)).toBeNull();
+});
+
+describe("moveBlock / tripLock (#30)", () => {
+  const today = "2026-11-16";
+  const trip = (date: string, kind: "store" | "rohlik" = "store", status: "planned" | "done" = "planned") => ({
+    date,
+    kind,
+    status,
+  });
+  const gen = { manual: false, meals: [{ date: "2026-11-18", slot: "lunch" as const }] };
+
+  test("generated items can't go after their meal or to a Rohlík trip on a Lunch day", () => {
+    expect(moveBlock(trip("2026-11-16"), gen, today)).toBeNull();
+    expect(moveBlock(trip("2026-11-18"), gen, today)).toBeNull();
+    expect(moveBlock(trip("2026-11-18", "rohlik"), gen, today)).toBe("afterMeal");
+    expect(moveBlock(trip("2026-11-19"), gen, today)).toBe("afterMeal");
+  });
+
+  test("manual items go to any open trip from today on", () => {
+    const manual = { manual: true, meals: [] };
+    expect(moveBlock(trip("2026-12-01"), manual, today)).toBeNull();
+    expect(moveBlock(trip("2026-11-15"), manual, today)).toBe("past");
+    expect(moveBlock(trip("2026-11-20", "store", "done"), manual, today)).toBe("done");
+  });
+
+  test("a past trip or one with a ticked item is locked", () => {
+    expect(tripLock({ date: today }, [{ checked: false }], today)).toBeNull();
+    expect(tripLock({ date: today }, [{ checked: true }], today)).toBe("checked");
+    expect(tripLock({ date: "2026-11-15" }, [], today)).toBe("past");
+  });
 });

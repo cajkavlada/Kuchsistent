@@ -8,6 +8,11 @@ import { isTestMode } from "./lib/testMode";
 import { membershipOf, requireMember, requireUserId } from "./lib/membership";
 import { regenerateShopping } from "./shopping";
 import {
+  DEFAULT_TRIP_INTERVAL_DAYS,
+  MAX_TRIP_INTERVAL_DAYS,
+  MIN_TRIP_INTERVAL_DAYS,
+} from "./lib/shopping";
+import {
   MAX_FRESHNESS_DAYS,
   MIN_FRESHNESS_DAYS,
   defaultFreshnessDays,
@@ -47,6 +52,7 @@ export const current = query({
       _id: doc._id,
       defaultPortions: doc.defaultPortions,
       freshness: freshnessTable(doc.freshnessDays),
+      tripIntervalDays: doc.tripIntervalDays ?? DEFAULT_TRIP_INTERVAL_DAYS,
     };
   },
 });
@@ -105,6 +111,32 @@ export const setDefaultPortions = mutation({
     return null;
   },
 });
+
+/**
+ * "Jak často nakupovat" in settings (#7, #30): days between default
+ * Shopping Trips. Only trips created afterwards follow it.
+ */
+export const setTripInterval = mutation({
+  args: { days: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { days }) => {
+    const { household } = await requireMember(ctx);
+    return await setTripIntervalFor(ctx, household, days);
+  },
+});
+
+export async function setTripIntervalFor(
+  ctx: MutationCtx,
+  household: Id<"households">,
+  days: number,
+): Promise<null> {
+  if (!Number.isInteger(days) || days < MIN_TRIP_INTERVAL_DAYS || days > MAX_TRIP_INTERVAL_DAYS) {
+    throw new ConvexError({ code: "INVALID_DAYS" });
+  }
+  await ctx.db.patch("households", household, { tripIntervalDays: days });
+  await regenerateShopping(ctx, household);
+  return null;
+}
 
 /**
  * "Čerstvost" in settings (#22): a Freshness Class's day limit for this

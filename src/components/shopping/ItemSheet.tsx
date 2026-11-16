@@ -1,18 +1,25 @@
 import { useMutation, useQuery } from "convex/react";
-import { ConvexError } from "convex/values";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { daysLabel, freshnessLabel, sectionLabel } from "@convex/lib/ingredients";
 import { Sheet } from "~/components/recipes/ui";
 import { dayLabel, SLOT_LABEL } from "~/lib/plan";
-import { freshExplanation, itemAmount, noteTone } from "~/lib/shopping";
+import {
+  errorCode,
+  freshExplanation,
+  itemAmount,
+  MOVE_BLOCK_LABEL,
+  noteTone,
+  shoppingError,
+} from "~/lib/shopping";
 
 /**
  * The item sheet (#10, #29), opened by tapping an item's name: amount, Store
  * Section, Freshness Class and trip; why it's flagged; "Proč to kupuju" (the
- * Planned Meals behind it); the Plenty toggle; and "Smazat" for an item no
- * meal needs any more.
+ * Planned Meals behind it); "Nakoupit při nákupu" trip chips to move it
+ * (#30); the Plenty toggle; and "Smazat" for a Manual Shopping Item or an
+ * item no meal needs any more.
  */
 export function ItemSheet({
   itemId,
@@ -25,6 +32,8 @@ export function ItemSheet({
 }) {
   const item = useQuery(api.shopping.item, { itemId });
   const removeItem = useMutation(api.shopping.removeItem);
+  const moveItem = useMutation(api.shopping.moveItem);
+  const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (item === undefined) {
@@ -54,8 +63,20 @@ export function ItemSheet({
       await removeItem({ itemId });
       onClose();
     } catch (e) {
-      const code = e instanceof ConvexError ? (e.data as { code?: string }).code : undefined;
-      setError(code === "ITEM_NOT_REMOVABLE" ? "Tuhle položku smazat nejde." : "Smazání se nepovedlo.");
+      const code = errorCode(e);
+      setError(shoppingError(code, "Smazání se nepovedlo."));
+    }
+  }
+
+  async function move(tripId: Id<"shoppingTrips">) {
+    setError(null);
+    setMoving(true);
+    try {
+      await moveItem({ itemId, tripId });
+    } catch (e) {
+      setError(shoppingError(errorCode(e), "Přesun se nepovedl."));
+    } finally {
+      setMoving(false);
     }
   }
 
@@ -68,13 +89,15 @@ export function ItemSheet({
       <p className="muted small">
         {ing
           ? `${sectionLabel(ing.storeSection)} · ${freshnessLabel(ing.freshnessClass)} (${daysLabel(ing.freshnessDays)})`
-          : "Přidáno ručně"}
+          : sectionLabel("other")}
         {" · "}
         {item.trip.kind === "rohlik" ? "🚚" : "🛒"} nákup {dayLabel(item.trip.date)}
       </p>
-      {(item.optional || item.checked) && (
+      {(item.optional || item.checked || item.pinned || item.manual) && (
         <div className="badges">
           {item.checked && <span className="bd">✓ odškrtnuto</span>}
+          {item.pinned && <span className="bd pin">📌 přesunuto ručně</span>}
+          {item.manual && <span className="bd man">✋ přidáno ručně</span>}
           {item.optional && <span className="bd">volitelné</span>}
         </div>
       )}
@@ -114,6 +137,33 @@ export function ItemSheet({
         </div>
       )}
 
+      {item.targets.length > 1 && (
+        <div>
+          <h3 className="isheet-sub">Nakoupit při nákupu</h3>
+          <div className="chips">
+            {item.targets.map((t) => (
+              <button
+                key={t._id}
+                className={`chip${t.current ? " on" : ""}`}
+                aria-pressed={t.current}
+                disabled={moving || t.block !== null}
+                onClick={() => !t.current && void move(t._id)}
+              >
+                {dayLabel(t.date)} {t.kind === "rohlik" ? "🚚" : "🛒"}
+                {t.block && ` · ${MOVE_BLOCK_LABEL[t.block]}`}
+              </button>
+            ))}
+          </div>
+          {!item.manual && (
+            <p className="muted small">
+              {item.pinned
+                ? "Přesunuto ručně: zůstane tady i po změnách v plánu, dokud tenhle nákup stihne jídlo."
+                : "Přesunutá položka zůstane na vybraném nákupu i po změnách v plánu."}
+            </p>
+          )}
+        </div>
+      )}
+
       {ing && (
         <label className="check plenty-toggle">
           <input
@@ -129,7 +179,7 @@ export function ItemSheet({
         </label>
       )}
 
-      {item.notNeeded && (
+      {(item.notNeeded || item.manual) && (
         <button className="btn danger" onClick={remove}>
           Smazat
         </button>

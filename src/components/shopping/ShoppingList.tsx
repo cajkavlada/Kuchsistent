@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { dayLabel } from "~/lib/plan";
@@ -12,9 +12,12 @@ import {
   itemAmount,
   noteTone,
   progress,
+  errorCode,
+  shoppingError,
   splitPlenty,
 } from "~/lib/shopping";
 import { ItemSheet } from "./ItemSheet";
+import { AddTripSheet, TripMenuSheet } from "./TripSheets";
 
 type List = FunctionReturnType<typeof api.shopping.list>;
 type Trip = List["trips"][number];
@@ -24,10 +27,12 @@ type Item = Trip["items"][number];
 const FLASH_MS = 1600;
 
 /**
- * Nákup, variant A of #10: trip tabs, then one Shopping Trip grouped by
- * Store Section, with Plenty items in a "Máme dost" box at the bottom (#29).
- * Ticks are optimistic and live for both Members. Tapping the circle ticks;
- * tapping the name opens the item sheet.
+ * Nákup, variant A of #10: trip tabs (with "+" to add a trip, #30), then one
+ * Shopping Trip grouped by Store Section, with Plenty items in a "Máme dost"
+ * box at the bottom (#29). The trip's "⋯" menu switches, moves, deletes and
+ * closes it; the field on top adds Manual Shopping Items (#30). Ticks are
+ * optimistic and live for both Members. Tapping the circle ticks; tapping
+ * the name opens the item sheet.
  */
 export function ShoppingList() {
   const data = useQuery(api.shopping.list, {});
@@ -73,6 +78,7 @@ export function ShoppingList() {
   const { flashing, markMine } = useRemoteFlash(data);
   const [selected, setSelected] = useState<Id<"shoppingTrips"> | null>(null);
   const [open, setOpen] = useState<Id<"shoppingItems"> | null>(null);
+  const [sheet, setSheet] = useState<"addTrip" | "menu" | null>(null);
 
   if (data === undefined) {
     return (
@@ -94,7 +100,21 @@ export function ShoppingList() {
           <Link to="/plan" className="btn primary">
             Otevřít plán
           </Link>
+          <button className="btn" onClick={() => setSheet("addTrip")}>
+            ＋ Přidat nákup
+          </button>
         </div>
+        {sheet === "addTrip" && (
+          <AddTripSheet
+            today={data.today}
+            takenDays={new Set()}
+            onClose={() => setSheet(null)}
+            onAdded={(id) => {
+              setSelected(id);
+              setSheet(null);
+            }}
+          />
+        )}
       </section>
     );
   }
@@ -115,16 +135,34 @@ export function ShoppingList() {
   return (
     <section className="page shop">
       <h1>Nákup</h1>
-      <TripTabs trips={data.trips} current={trip._id} onSelect={setSelected} />
+      <TripTabs
+        trips={data.trips}
+        current={trip._id}
+        onSelect={setSelected}
+        onAdd={() => setSheet("addTrip")}
+      />
       <TripView
         trip={trip}
         today={data.today}
+        onMenu={() => setSheet("menu")}
         flashing={flashing}
         onTick={tick}
         onOpen={(i) => setOpen(i._id)}
         onRunningLow={(i) => i.ingredient && plenty(i.ingredient, false)}
       />
       {open && <ItemSheet itemId={open} onClose={() => setOpen(null)} onPlenty={plenty} />}
+      {sheet === "menu" && <TripMenuSheet trip={trip} today={data.today} onClose={() => setSheet(null)} />}
+      {sheet === "addTrip" && (
+        <AddTripSheet
+          today={data.today}
+          takenDays={new Set(data.trips.map((t) => t.date))}
+          onClose={() => setSheet(null)}
+          onAdded={(id) => {
+            setSelected(id);
+            setSheet(null);
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -133,10 +171,12 @@ function TripTabs({
   trips,
   current,
   onSelect,
+  onAdd,
 }: {
   trips: Trip[];
   current: Id<"shoppingTrips">;
   onSelect: (id: Id<"shoppingTrips">) => void;
+  onAdd: () => void;
 }) {
   const active = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -163,6 +203,9 @@ function TripTabs({
           </button>
         );
       })}
+      <button className="trip-tab add" aria-label="Přidat nákup" onClick={onAdd}>
+        ＋
+      </button>
     </div>
   );
 }
@@ -170,6 +213,7 @@ function TripTabs({
 function TripView({
   trip,
   today,
+  onMenu,
   flashing,
   onTick,
   onOpen,
@@ -177,6 +221,7 @@ function TripView({
 }: {
   trip: Trip;
   today: string;
+  onMenu: () => void;
   flashing: Set<string>;
   onTick: (item: Item) => void;
   onOpen: (item: Item) => void;
@@ -196,6 +241,9 @@ function TripView({
         <span className={`kind${trip.kind === "rohlik" ? " rl" : ""}`}>
           {trip.kind === "rohlik" ? "🚚 Rohlík" : "🛒 Obchod"}
         </span>
+        <button className="icon-btn small" aria-label="Možnosti nákupu" onClick={onMenu}>
+          ⋯
+        </button>
       </div>
       <div className="pbar" aria-hidden="true">
         <i style={{ width: `${p.total ? (100 * p.done) / p.total : 0}%` }} />
@@ -203,7 +251,9 @@ function TripView({
       <p className="muted small">
         {p.done} z {p.total} odškrtnuto
         {warnings > 0 && <span className="warn-text"> · ⚠ {warnings} nebude čerstvé</span>}
+        {trip.status === "done" && " · nákup hotový"}
       </p>
+      {trip.status === "planned" && trip.date >= today && <AddItem key={trip._id} tripId={trip._id} />}
       {groups.length === 0 && plenty.length === 0 && (
         <p className="muted">Na tenhle nákup zatím nic není.</p>
       )}
@@ -244,12 +294,51 @@ function TripView({
 }
 
 function Badges({ item }: { item: Item }) {
-  if (!item.fresh && !item.optional) return null;
+  if (!item.fresh && !item.optional && !item.pinned && !item.manual) return null;
   return (
     <span className="badges">
       {item.fresh && <span className="bd w">{freshBadge(item.fresh)}</span>}
+      {item.pinned && <span className="bd pin">📌 přesunuto ručně</span>}
+      {item.manual && <span className="bd man">✋ přidáno ručně</span>}
       {item.optional && <span className="bd">volitelné</span>}
     </span>
+  );
+}
+
+/** "Add your own item" (#10, #30): a Manual Shopping Item on this trip. */
+function AddItem({ tripId }: { tripId: Id<"shoppingTrips"> }) {
+  const add = useMutation(api.shopping.addManualItem);
+  const [label, setLabel] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const text = label.trim();
+    if (!text) return;
+    setLabel("");
+    setError(null);
+    add({ tripId, label: text }).catch((err) => {
+      setLabel(text);
+      setError(shoppingError(errorCode(err), "Položku se nepodařilo přidat."));
+    });
+  }
+
+  return (
+    <form className="additem" onSubmit={submit}>
+      <input
+        className="finput"
+        value={label}
+        maxLength={80}
+        enterKeyHint="done"
+        placeholder="Přidat vlastní položku (např. toaletní papír)"
+        aria-label="Vlastní položka"
+        onChange={(e) => setLabel(e.target.value)}
+      />
+      <button className="btn" disabled={!label.trim()}>
+        Přidat
+      </button>
+      {error && <p className="error" role="alert">{error}</p>}
+    </form>
   );
 }
 

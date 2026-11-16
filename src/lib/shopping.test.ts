@@ -1,5 +1,7 @@
 import { expect, test } from "vitest";
 import {
+  everyDays,
+  shoppingError,
   freshBadge,
   freshCount,
   freshExplanation,
@@ -75,4 +77,16 @@ test("freshness texts", () => {
   expect(freshExplanation({ gap: 2, max: 1 }, "Velmi čerstvé")).toBe(
     "Kupuješ 2 dny před jídlem, ale „Velmi čerstvé\" vydrží jen 1 den. Je to jen upozornění – položka na seznamu zůstává.",
   );
+});
+
+test("everyDays words the trip interval", () => {
+  expect(everyDays(1)).toBe("každý den");
+  expect(everyDays(2)).toBe("každé 2 dny");
+  expect(everyDays(7)).toBe("každých 7 dní");
+});
+
+test("shoppingError maps codes to Czech and falls back", () => {
+  expect(shoppingError("TRIP_HAS_CHECKED", "x")).toBe("Nákup už má odškrtnuté položky.");
+  expect(shoppingError("SOMETHING_ELSE", "Nepovedlo se.")).toBe("Nepovedlo se.");
+  expect(shoppingError(undefined, "Nepovedlo se.")).toBe("Nepovedlo se.");
 });
