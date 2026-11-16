@@ -63,8 +63,15 @@ export default defineSchema({
     category: v.union(v.literal("main"), v.literal("special")),
     status: v.union(v.literal("draft"), v.literal("confirmed")),
     archived: v.boolean(),
-    /** Servings the book's amounts are for; unset when the book gives none. */
+    /**
+     * Servings the book's amounts are for; unset when the book gives none
+     * (counts as the Household default, never scaled, until filled in).
+     */
     baseServings: v.optional(v.number()),
+    /** Draft only: "Nevím – nechat výchozí" answered the "Pro kolik osob?" check (#20). */
+    servingsUnknown: v.optional(v.boolean()),
+    /** Draft only: the model reports the recipe goes on past the photos (#20). */
+    continuesOffPage: v.optional(v.boolean()),
     steps: v.array(v.string()),
     notes: v.optional(v.string()),
     source: v.optional(v.object({ book: v.string(), page: v.string() })),
@@ -106,6 +113,8 @@ export default defineSchema({
     ingredient: v.optional(v.id("ingredients")),
     /** Optional Line ("případně", "na ozdobu"); unset on lines saved before #19. */
     optional: v.optional(v.boolean()),
+    /** Draft only: the model wasn't sure of this reading ("Nejisté čtení", #20). */
+    uncertain: v.optional(v.boolean()),
     proposed: v.optional(
       v.object({
         ...vProposal.fields,

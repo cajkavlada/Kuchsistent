@@ -15,6 +15,7 @@ export function Reading({ recipe }: { recipe: RecipeView }) {
       <ScanView
         photoUrl={recipe.photos[0]?.url ?? null}
         stage={recipe.extraction?.stage === "match" ? "match" : "read"}
+        pages={recipe.photos.length}
       />
       <p className="muted small center-text">
         Obvykle 5–20 s. Když aplikaci zavřeš, čtení doběhne a koncept najdeš

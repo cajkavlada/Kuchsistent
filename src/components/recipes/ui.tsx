@@ -51,7 +51,15 @@ export const STAGES = [
 export type Stage = (typeof STAGES)[number]["id"];
 
 /** The photo with a moving scan line and the current reading stage. */
-export function ScanView({ photoUrl, stage }: { photoUrl: string | null; stage: Stage }) {
+export function ScanView({
+  photoUrl,
+  stage,
+  pages = 1,
+}: {
+  photoUrl: string | null;
+  stage: Stage;
+  pages?: number;
+}) {
   const at = STAGES.findIndex((s) => s.id === stage);
   return (
     <>
@@ -59,7 +67,7 @@ export function ScanView({ photoUrl, stage }: { photoUrl: string | null; stage: 
         {photoUrl ? <img src={photoUrl} alt="Fotka receptu" /> : <div className="scan-empty" />}
         <div className="scanline" />
         <div className="scanmsg" aria-live="polite">
-          {STAGES[at].label}…
+          {STAGES[at].label}…{pages > 1 ? ` (${pages} str.)` : ""}
         </div>
       </div>
       <ol className="stages">
@@ -86,15 +94,22 @@ export function PhotoPane({ photos }: { photos: Photo[] }) {
   const [viewer, setViewer] = useState(false);
   const first = photos[0];
   if (!first?.url) return null;
-  const pages = photos.length > 1 ? ` (${photos.length} str.)` : "";
+  const many = photos.length > 1;
+  const pages = many ? ` (${photos.length} str.)` : "";
   return (
     <>
       {size === "small" ? (
         <div className="photostrip">
-          <button type="button" className="pthumb" onClick={() => setViewer(true)} aria-label="Fotka na celou obrazovku">
+          <button
+            type="button"
+            className="pthumb"
+            onClick={() => setViewer(true)}
+            aria-label={many ? `Všech ${photos.length} stránek na celou obrazovku` : "Fotka na celou obrazovku"}
+          >
             <img src={first.url} alt="Fotka receptu" />
+            {many && <span className="pcount">{photos.length} str.</span>}
           </button>
-          <span className="muted small grow">Fotka receptu{pages}</span>
+          <span className="muted small grow">{many ? `Fotky receptu · ${photos.length} str.` : "Fotka receptu"}</span>
           <button type="button" className="chip" onClick={() => setSize("large")}>
             Zvětšit
           </button>
@@ -107,6 +122,11 @@ export function PhotoPane({ photos }: { photos: Photo[] }) {
           <div className={`photoscroll${zoom ? " zoom" : ""}`}>
             <img src={first.url} alt="Fotka receptu" onClick={() => setViewer(true)} />
           </div>
+          {many && (
+            <button type="button" className="pcount big" onClick={() => setViewer(true)}>
+              {photos.length} str.
+            </button>
+          )}
           <div className="pctl">
             <button type="button" onClick={() => setZoom((z) => !z)}>
               {zoom ? "− detail" : "＋ detail"}

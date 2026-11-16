@@ -9,6 +9,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { MAX_PHOTOS, checkQueue } from "./lib/checks";
 import { MAX_SERVINGS } from "./lib/extraction";
 import {
   cleanIngredientName,
@@ -27,10 +28,11 @@ import { assertSameHousehold, requireMember, type Member } from "./lib/membershi
  * AI model (`extractNode.run`), review the summary and save a confirmed Recipe.
  * Lines are matched to Household Ingredients (#19); new Ingredients the AI
  * proposes are shown with a "nová" badge, editable in the line sheet, and
- * created on save.
+ * created on save. Before saving, the check queue (#20, `lib/checks.ts`)
+ * must be empty: "Recept pokračuje" (add pages and read again), "Pro kolik
+ * osob?", "Nejisté čtení" and "Řádek bez suroviny".
  */
 
-export const MAX_PHOTOS = 10;
 const MAX_NAME = 200;
 const MAX_RAW = 300;
 const MAX_UNIT = 30;
@@ -65,6 +67,7 @@ const vReadLine = v.object({
   unit: v.optional(v.string()),
   name: v.optional(v.string()),
   optional: v.optional(v.boolean()),
+  uncertain: v.optional(v.boolean()),
 });
 const vLineToMatch = v.object({ name: v.string(), unit: v.optional(v.string()), raw: v.string() });
 const vMatchResult = v.object({
@@ -210,7 +213,7 @@ async function linesOf(ctx: QueryCtx, recipeId: Id<"recipes">) {
 async function replaceLines(
   ctx: MutationCtx,
   recipeId: Id<"recipes">,
-  lines: { raw: string; amount?: number; unit?: string; optional?: boolean }[],
+  lines: { raw: string; amount?: number; unit?: string; optional?: boolean; uncertain?: boolean }[],
 ) {
   for (const old of await linesOf(ctx, recipeId)) {
     await ctx.db.delete("ingredientLines", old._id);
@@ -240,28 +243,36 @@ export const generateUploadUrl = mutation({
   },
 });
 
+/**
+ * New pages for a recipe that already has `existing` photos: 1+ uploaded
+ * files, no duplicates, none used by another photo, at most MAX_PHOTOS in all.
+ */
+async function checkNewPhotos(ctx: QueryCtx, storageIds: Id<"_storage">[], existing = 0) {
+  if (storageIds.length === 0 || existing + storageIds.length > MAX_PHOTOS) {
+    throw new ConvexError({ code: "INVALID_PHOTOS" });
+  }
+  if (new Set(storageIds).size !== storageIds.length) {
+    throw new ConvexError({ code: "INVALID_PHOTOS" });
+  }
+  for (const storageId of storageIds) {
+    const file = await ctx.db.system.get("_storage", storageId);
+    const used = await ctx.db
+      .query("recipePhotos")
+      .withIndex("by_storage", (q) => q.eq("storageId", storageId))
+      .first();
+    if (file === null || used !== null) {
+      throw new ConvexError({ code: "INVALID_PHOTOS" });
+    }
+  }
+}
+
 /** Shared by `createDraft`; exported for tests. */
 export async function createDraftFor(
   ctx: MutationCtx,
   member: Member,
   storageIds: Id<"_storage">[],
 ): Promise<Id<"recipes">> {
-if (storageIds.length === 0 || storageIds.length > MAX_PHOTOS) {
-  throw new ConvexError({ code: "INVALID_PHOTOS" });
-}
-if (new Set(storageIds).size !== storageIds.length) {
-  throw new ConvexError({ code: "INVALID_PHOTOS" });
-}
-for (const storageId of storageIds) {
-  const file = await ctx.db.system.get("_storage", storageId);
-  const used = await ctx.db
-    .query("recipePhotos")
-    .withIndex("by_storage", (q) => q.eq("storageId", storageId))
-    .first();
-  if (file === null || used !== null) {
-    throw new ConvexError({ code: "INVALID_PHOTOS" });
-  }
-}
+await checkNewPhotos(ctx, storageIds);
 const recipeId = await ctx.db.insert("recipes", {
   household: member.household,
   name: "",
@@ -286,6 +297,35 @@ export const createDraft = mutation({
     return await createDraftFor(ctx, member, storageIds);
   },
 });
+
+/**
+ * "Vyfotit další stránku" (#20): appends pages to a Draft Recipe and reads
+ * the whole recipe again from all its pages. The new reading replaces the
+ * draft's name, servings, lines and steps.
+ */
+export const addPages = mutation({
+  args: { recipeId: v.id("recipes"), storageIds: v.array(v.id("_storage")) },
+  returns: v.null(),
+  handler: async (ctx, args) => addPagesFor(ctx, await requireMember(ctx), args),
+});
+
+export async function addPagesFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId, storageIds }: { recipeId: Id<"recipes">; storageIds: Id<"_storage">[] },
+): Promise<null> {
+  const recipe = await loadEditable(ctx, member, recipeId);
+  if (recipe.status !== "draft") throw new ConvexError({ code: "NOT_A_DRAFT" });
+  const photos = await photosOf(ctx, recipeId);
+  await checkNewPhotos(ctx, storageIds, photos.length);
+  let order = photos.length ? photos[photos.length - 1].order + 1 : 0;
+  for (const storageId of storageIds) {
+    await ctx.db.insert("recipePhotos", { recipe: recipeId, storageId, order: order++ });
+  }
+  await ctx.db.patch("recipes", recipeId, { continuesOffPage: undefined });
+  await scheduleExtraction(ctx, recipeId);
+  return null;
+}
 
 /** Read the photos again after a failed (or lost) reading run. */
 export const retryExtraction = mutation({
@@ -347,6 +387,7 @@ export const applyExtraction = internalMutation({
       baseServings: v.optional(v.number()),
       steps: v.array(v.string()),
       lines: v.array(vReadLine),
+      continuesOffPage: v.optional(v.boolean()),
     }),
   },
   returns: v.union(v.null(), v.object({ catalogue: v.array(v.string()) })),
@@ -357,6 +398,9 @@ export const applyExtraction = internalMutation({
     await ctx.db.patch("recipes", recipeId, {
       name: draft.name.slice(0, MAX_NAME),
       baseServings: draft.baseServings,
+      // A new reading asks again: "Nevím" was about the earlier pages.
+      servingsUnknown: undefined,
+      continuesOffPage: draft.continuesOffPage || undefined,
       steps: draft.steps.slice(0, MAX_STEPS).map((s) => s.slice(0, MAX_STEP)),
       extraction: { state: "pending", stage: "match", model, startedAt },
     });
@@ -368,6 +412,7 @@ export const applyExtraction = internalMutation({
         amount: l.amount,
         unit: l.unit?.slice(0, MAX_UNIT),
         optional: l.optional ?? false,
+        ...(l.uncertain ? { uncertain: true } : {}),
       })),
     );
     const catalogue = await catalogueOf(ctx, recipe!.household);
@@ -483,6 +528,7 @@ export async function lineViewsFor(ctx: QueryCtx, member: Member, recipeId: Id<"
       amount: l.amount,
       unit: l.unit,
       optional: l.optional ?? false,
+      uncertain: l.uncertain ?? false,
       ingredient: ing ? { _id: ing._id, name: ing.name } : null,
       proposed:
         !ing && l.proposed
@@ -521,6 +567,8 @@ export const get = query({
       status: recipe.status,
       archived: recipe.archived,
       baseServings: recipe.baseServings,
+      servingsUnknown: recipe.servingsUnknown ?? false,
+      continuesOffPage: recipe.continuesOffPage ?? false,
       steps: recipe.steps,
       extraction: e
         ? {
@@ -562,6 +610,51 @@ export async function updateBasicsFor(
     category,
     baseServings: checkServings(baseServings),
   });
+  return null;
+}
+
+/** "Pro kolik osob?": a number chip sets the servings. */
+export const setServings = mutation({
+  args: { recipeId: v.id("recipes"), baseServings: v.number() },
+  returns: v.null(),
+  handler: async (ctx, args) => setServingsFor(ctx, await requireMember(ctx), args),
+});
+
+export async function setServingsFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId, baseServings }: { recipeId: Id<"recipes">; baseServings: number },
+): Promise<null> {
+  await loadEditable(ctx, member, recipeId);
+  await ctx.db.patch("recipes", recipeId, { baseServings: checkServings(baseServings) });
+  return null;
+}
+
+/**
+ * Answers a recipe-level check without changing the recipe: "Nevím – nechat
+ * výchozí" (`servings`) or "Ne, je to celé" (`continues`).
+ */
+export const dismissCheck = mutation({
+  args: {
+    recipeId: v.id("recipes"),
+    check: v.union(v.literal("servings"), v.literal("continues")),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => dismissCheckFor(ctx, await requireMember(ctx), args),
+});
+
+export async function dismissCheckFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId, check }: { recipeId: Id<"recipes">; check: "servings" | "continues" },
+): Promise<null> {
+  const recipe = await loadEditable(ctx, member, recipeId);
+  if (recipe.status !== "draft") throw new ConvexError({ code: "NOT_A_DRAFT" });
+  await ctx.db.patch(
+    "recipes",
+    recipeId,
+    check === "servings" ? { servingsUnknown: true } : { continuesOffPage: undefined },
+  );
   return null;
 }
 
@@ -633,7 +726,8 @@ export async function updateLineFor(
 ): Promise<null> {
   const old = await loadEditableLine(ctx, member, lineId);
   const { raw, amount, unit } = cleanLine(line);
-  const patch: Partial<Doc<"ingredientLines">> = { raw, amount, unit };
+  // Saving a line means a person has looked at it: "✓ Takhle je to správně".
+  const patch: Partial<Doc<"ingredientLines">> = { raw, amount, unit, uncertain: undefined };
   if (line.optional !== undefined) patch.optional = line.optional;
   if (line.ingredientName !== undefined) {
     const current = await currentName(ctx, old);
@@ -750,10 +844,15 @@ export async function confirmFor(
     throw new ConvexError({ code: "EXTRACTION_FAILED" });
   }
   if (!recipe.name.trim()) throw new ConvexError({ code: "NAME_REQUIRED" });
+  const lines = await linesOf(ctx, recipeId);
+  const checks = checkQueue(
+    recipe,
+    lines.map((l) => ({ _id: l._id, uncertain: l.uncertain, hasIngredient: !!(l.ingredient || l.proposed) })),
+  );
+  if (checks.length > 0) throw new ConvexError({ code: "CHECKS_PENDING" });
   const byKey = new Map(
     (await catalogueOf(ctx, member.household)).map((i) => [ingredientKey(i.name), i._id]),
   );
-  const lines = await linesOf(ctx, recipeId);
   // New Ingredients are created on save, once per name.
   for (const l of lines) {
     if (!l.proposed) continue;
@@ -776,6 +875,8 @@ export async function confirmFor(
   }
   await ctx.db.patch("recipes", recipeId, {
     status: "confirmed",
+    servingsUnknown: undefined,
+    continuesOffPage: undefined,
     steps: cleanSteps(recipe.steps),
   });
   return null;

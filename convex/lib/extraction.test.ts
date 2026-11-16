@@ -1,7 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  USER_PROMPT,
   draftFromExtraction,
   extractWithFallback,
+  userPrompt,
   type Extraction,
   type ModelCaller,
 } from "./extraction";
@@ -108,6 +110,7 @@ describe("draftFromExtraction", () => {
         // In the "Na ozdobu" group, so optional.
         { raw: "sůl", amount: undefined, unit: undefined, name: "sůl", optional: true },
       ],
+      continuesOffPage: false,
     });
   });
 
@@ -162,4 +165,17 @@ describe("draftFromExtraction", () => {
     });
     expect(draft.lines.map((l) => l.optional)).toEqual([true, true, true, false]);
   });
+
+  test("marks lines the model was unsure of, and keeps continuesOffPage", () => {
+    const draft = draftFromExtraction({
+      recipes: [recipe({ uncertain: ["½ L  smetany", "něco jiného"], continuesOffPage: true })],
+    });
+    expect(draft.lines.map((l) => l.uncertain ?? false)).toEqual([false, true, false]);
+    expect(draft.continuesOffPage).toBe(true);
+  });
+});
+
+test("several photos are read as consecutive pages of one recipe", () => {
+  expect(userPrompt(1)).toBe(USER_PROMPT);
+  expect(userPrompt(3)).toMatch(/\(3\) jsou po sobě jdoucí stránky jednoho receptu/);
 });
