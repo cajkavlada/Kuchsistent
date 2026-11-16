@@ -217,3 +217,5 @@ textarea.finput { min-height: 76px; resize: vertical; }
   width: 64px; height: 64px; border-radius: 50%; background: #e3efe1; color: var(--green);
   font-size: 2rem; display: flex; align-items: center; justify-content: center;
 }
+.errdetail { font-size: .8rem; color: var(--muted); }
+.errdetail code { display: block; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }

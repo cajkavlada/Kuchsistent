@@ -27,6 +27,12 @@ export function ReadingFailed({ recipe }: { recipe: RecipeView }) {
     <section className="page">
       <TopBar title="Nepodařilo se přečíst" />
       <p className="banner warn">Recept se z fotky nepodařilo přečíst.</p>
+      {recipe.extraction?.error && (
+        <details className="errdetail">
+          <summary>Podrobnosti</summary>
+          <code>{recipe.extraction.error}</code>
+        </details>
+      )}
       <PhotoPane photos={recipe.photos} />
       <RetryButtons recipe={recipe} />
     </section>
