@@ -8,6 +8,8 @@ import { SignIn } from "./SignIn";
 import { Splash } from "./Splash";
 import { AppLayout } from "./AppLayout";
 import { ApplyTesterName } from "./TestLogin";
+import { Offline, OfflineNotice } from "./Offline";
+import { rememberMember, useOnline, wasMember } from "~/pwa";
 
 /**
  * Signed out → sign-in; pending Invite → join; no Household → onboarding;
@@ -16,7 +18,8 @@ import { ApplyTesterName } from "./TestLogin";
 export function Gate({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const [pendingInvite, setPendingInvite] = useState(capturePendingInvite);
-  if (isLoading) return <Splash />;
+  const online = useOnline();
+  if (isLoading) return online ? <Splash /> : <OfflineShell />;
   if (!isAuthenticated) return <SignIn invited={pendingInvite !== null} />;
   if (pendingInvite !== null) {
     return (
@@ -39,9 +42,29 @@ export function Gate({ children }: { children: ReactNode }) {
 
 function Member({ children }: { children: ReactNode }) {
   const me = useQuery(api.households.me);
-  if (me === undefined) return <Splash />;
+  const online = useOnline();
+  const isMember = me ? me.household !== null : null;
+  useEffect(() => {
+    if (isMember !== null) rememberMember(isMember);
+  }, [isMember]);
+
+  if (me === undefined) return online ? <Splash /> : <OfflineShell />;
   if (me.household === null) return <Onboarding mayCreate={me.mayCreateHousehold} />;
   return <AppLayout>{children}</AppLayout>;
+}
+
+/**
+ * Started without signal (#13, #16): Convex has no data on the device, so
+ * show the app's tabs with "Bez připojení" to known Members, otherwise a
+ * plain offline screen. The Gate switches to live data once back online.
+ */
+function OfflineShell() {
+  if (!wasMember()) return <Offline />;
+  return (
+    <AppLayout>
+      <OfflineNotice />
+    </AppLayout>
+  );
 }
 
 /** Opened an Invite link: join automatically, or say clearly why not. */

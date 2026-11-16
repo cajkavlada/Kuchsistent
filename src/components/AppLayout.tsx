@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { InstallBanner } from "./InstallBanner";
 
 const TABS = [
   { to: "/plan", label: "Plán", icon: "📅" },
@@ -11,7 +12,10 @@ const TABS = [
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="app">
-      <div className="content">{children}</div>
+      <div className="content">
+        <InstallBanner />
+        {children}
+      </div>
       <nav className="tabbar" aria-label="Hlavní navigace">
         {TABS.map((t) => (
           <Link key={t.to} to={t.to} className="tab" activeProps={{ className: "tab active" }}>

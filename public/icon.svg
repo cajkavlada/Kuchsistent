@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full-bleed background so the same art works as a maskable icon:
+       the pot stays inside the central 80 % safe zone. -->
+  <rect width="512" height="512" fill="#2f6b3a"/>
+  <g fill="none" stroke="#faf8f4" stroke-linecap="round" stroke-width="18">
+    <!-- steam -->
+    <path d="M206 150c-14-16 14-30 0-48"/>
+    <path d="M256 150c-14-16 14-30 0-48"/>
+    <path d="M306 150c-14-16 14-30 0-48"/>
+    <!-- side handles -->
+    <path d="M136 262h-24"/>
+    <path d="M376 262h24"/>
+  </g>
+  <g fill="#faf8f4">
+    <!-- lid + knob -->
+    <rect x="236" y="176" width="40" height="22" rx="11"/>
+    <path d="M128 232c0-22 18-36 40-36h176c22 0 40 14 40 36z"/>
+    <!-- body -->
+    <path d="M144 244h224v92c0 40-32 68-72 68h-80c-40 0-72-28-72-68z"/>
+  </g>
+  <rect x="144" y="278" width="224" height="14" fill="#2f6b3a" opacity=".25"/>
+</svg>
