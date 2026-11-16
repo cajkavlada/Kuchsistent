@@ -1,7 +1,7 @@
 #!/bin/sh
 # Vercel build (see vercel.json): deploy Convex production, then build the app.
-# Only production builds run; vercel.json's ignoreCommand skips every
-# preview build, so no Convex preview backends are created.
+# Only main deploys: vercel.json's git.deploymentEnabled turns off every
+# other branch, so no Convex preview backends are created.
 set -e
 exec npx convex deploy \
   --cmd 'npm run build' \
