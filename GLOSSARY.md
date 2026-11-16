@@ -10,6 +10,17 @@ A household cooking assistant: turns photographed (mostly Czech) cookbook recipe
 A dish the household cooks, captured from a cookbook photo and confirmed by a person. Only main meals and specials; no small dishes.
 _Avoid_: Dish, meal (a meal is a planned occurrence, not the recipe)
 
+**Draft Recipe**:
+A Recipe still being extracted or awaiting the user's review; it can't be planned until confirmed.
+_Avoid_: Pending recipe, unconfirmed
+
+**Archived Recipe**:
+A Recipe removed from the library and picker that still backs any meals already planned with it.
+_Avoid_: Deleted recipe
+
+**Recipe Category**:
+Whether a Recipe is a main (lunch/dinner) or a special; it filters the picker but doesn't restrict where the Recipe can be planned.
+
 **Recipe Photo**:
 The original picture of a cookbook page that a Recipe was extracted from; kept with the Recipe.
 _Avoid_: Scan, image
@@ -29,7 +40,7 @@ The group of people (the user and his wife) who share one plan and one shopping 
 _Avoid_: Family, account, team
 
 **Meal Slot**:
-A Lunch or Dinner position on a specific day.
+A Lunch, Dinner or Special position on a specific day; usually holds one item but may hold several.
 _Avoid_: Time slot, calendar slot
 
 **Planned Meal**:
@@ -41,7 +52,10 @@ A later Meal Slot covered by an earlier Planned Meal's surplus rather than by fr
 _Avoid_: Reheat, second serving
 
 **Special**:
-A Recipe planned for an occasion on a date (e.g. a birthday cake), in addition to that day's Lunch and Dinner rather than replacing them.
+A Planned Meal for an Occasion on a date (e.g. a birthday cake), in addition to that day's Lunch and Dinner; a day may have several.
+
+**Occasion**:
+The free-text reason for a Special (e.g. "Ondra – narozeniny").
 _Avoid_: Occasion meal, extra slot
 
 **Portions**:
@@ -62,8 +76,11 @@ How long an Ingredient stays good after purchase (e.g. fresh meat, vegetables, l
 _Avoid_: Shelf life, expiry
 
 **Shopping Item**:
-An Ingredient and an aggregated amount to buy on a specific Shopping Trip.
+An Ingredient and an aggregated amount to buy on a specific Shopping Trip, generated from the Planned Meals that need it.
 _Avoid_: List entry
+
+**Manual Shopping Item**:
+A Shopping Item the user added directly (e.g. toilet paper), not tied to any meal and never changed by regeneration.
 
 **Plenty**:
 A standing mark on an Ingredient meaning "we have enough at home"; it moves the Ingredient to a "we have plenty" section at the bottom of the shopping list until someone marks it running low.
