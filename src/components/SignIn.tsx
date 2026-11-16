@@ -4,6 +4,7 @@ import {
   useSignInWithGoogle,
 } from "@convex-dev/auth/methods/google/react";
 import { api } from "@convex/_generated/api";
+import { TestLogin } from "./TestLogin";
 
 const FLOW_ERRORS: Record<string, string> = {
   ACCESS_DENIED: "Přihlášení bylo zrušeno.",
@@ -43,6 +44,7 @@ export function SignIn() {
         {busy ? "Přesměrovávám…" : "Přihlásit se přes Google"}
       </button>
       {message && <p className="error" role="alert">{message}</p>}
+      <TestLogin />
     </main>
   );
 }

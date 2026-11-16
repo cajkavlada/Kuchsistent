@@ -5,13 +5,19 @@ import { Onboarding } from "./Onboarding";
 import { SignIn } from "./SignIn";
 import { Splash } from "./Splash";
 import { AppLayout } from "./AppLayout";
+import { ApplyTesterName } from "./TestLogin";
 
 /** Signed out → sign-in; no Household → onboarding; Member → the app. */
 export function Gate({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
   if (isLoading) return <Splash />;
   if (!isAuthenticated) return <SignIn />;
-  return <Member>{children}</Member>;
+  return (
+    <>
+      <ApplyTesterName />
+      <Member>{children}</Member>
+    </>
+  );
 }
 
 function Member({ children }: { children: ReactNode }) {

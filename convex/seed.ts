@@ -9,8 +9,12 @@ import { internalMutation } from "./_generated/server";
 export const preview = internalMutation({
   args: {},
   returns: v.null(),
-  handler: async () => {
-    console.log("Preview backend ready (nothing to seed yet).");
+  handler: async (ctx) => {
+    // Turn on the fake test sign-in (testLogin.ts) on this preview backend.
+    if ((await ctx.db.query("testMode").first()) === null) {
+      await ctx.db.insert("testMode", { enabled: true });
+    }
+    console.log("Preview backend ready: test sign-in enabled.");
     return null;
   },
 });

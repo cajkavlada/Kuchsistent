@@ -53,3 +53,9 @@ h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
 }
 .tab.active { color: var(--green); font-weight: 700; }
 .tab span:first-child { font-size: 1.3rem; }
+.row { display: flex; gap: .5rem; width: 100%; }
+.test-login {
+  margin-top: 1.5rem; padding: 12px; width: 100%; border: 1px dashed var(--muted);
+  border-radius: 12px; display: flex; flex-direction: column; gap: .5rem;
+}
+.test-login p { margin: 0; }

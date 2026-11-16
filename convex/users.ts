@@ -1,6 +1,7 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { vGoogleProfile } from "@convex-dev/auth/methods/google/server";
 import { internalMutation } from "./_generated/server";
+import { isTestMode } from "./lib/testMode";
 
 const vGoogleMethod = v.object({
   name: v.literal("google"),
@@ -35,5 +36,26 @@ export const onSignInGoogle = internalMutation({
       image: p.picture,
     });
     return null;
+  },
+});
+
+/**
+ * Preview-only test sign-in: create a fake user. Throwing here aborts the
+ * sign-up, so without `testMode` (i.e. on production) no account is made.
+ */
+export const createUserTest = internalMutation({
+  args: {
+    method: v.object({ name: v.literal("usernamePassword"), profile: v.object({}) }),
+  },
+  returns: v.id("users"),
+  handler: async (ctx) => {
+    if (!(await isTestMode(ctx))) {
+      throw new ConvexError({ code: "TEST_LOGIN_DISABLED" });
+    }
+    return await ctx.db.insert("users", {
+      name: "Tester",
+      emailVerified: false,
+      testUser: true,
+    });
   },
 });

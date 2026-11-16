@@ -1,7 +1,9 @@
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { mayCreateHousehold } from "./lib/config";
+import { isTestMode } from "./lib/testMode";
 import { membershipOf, requireMember, requireUserId } from "./lib/membership";
 
 /**
@@ -19,8 +21,7 @@ export const me = query({
       user: { name: user.name, email: user.email, image: user.image },
       household: membership?.household ?? null,
       mayCreateHousehold:
-        membership === null &&
-        mayCreateHousehold(user.email, user.emailVerified),
+        membership === null && (await userMayCreateHousehold(ctx, user)),
     };
   },
 });
@@ -35,6 +36,15 @@ export const current = query({
     return { _id: doc._id, defaultPortions: doc.defaultPortions };
   },
 });
+
+/** Allowlisted Google email, or a fake test user on a preview backend. */
+async function userMayCreateHousehold(
+  ctx: Pick<QueryCtx, "db">,
+  user: Doc<"users">,
+): Promise<boolean> {
+  if (mayCreateHousehold(user.email, user.emailVerified)) return true;
+  return user.testUser === true && (await isTestMode(ctx));
+}
 
 export const MIN_PORTIONS = 1;
 export const MAX_PORTIONS = 20;
@@ -61,7 +71,7 @@ export async function createHouseholdFor(
   if ((await membershipOf(ctx, userId)) !== null) {
     throw new ConvexError({ code: "ALREADY_A_MEMBER" });
   }
-  if (!mayCreateHousehold(user.email, user.emailVerified)) {
+  if (!(await userMayCreateHousehold(ctx, user))) {
     throw new ConvexError({ code: "NOT_ALLOWED_TO_CREATE" });
   }
   const household = await ctx.db.insert("households", { defaultPortions });
