@@ -39,6 +39,14 @@ _Avoid_: Product, grocery
 The group of people (the user and his wife) who share one plan and one shopping list.
 _Avoid_: Family, account, team
 
+**Member**:
+A person who belongs to a Household; every Member is equal and sees the same plan, list and recipes. A person belongs to exactly one Household.
+_Avoid_: User (when meaning a Household's person), owner, admin
+
+**Invite**:
+A single-use, time-limited link (with a short code) a Member creates so another person can join their Household.
+_Avoid_: Invitation code, share link
+
 **Meal Slot**:
 A Lunch, Dinner or Special position on a specific day; usually holds one item but may hold several.
 _Avoid_: Time slot, calendar slot
