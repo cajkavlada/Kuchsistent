@@ -5,6 +5,7 @@ import { validatePortions } from "./households";
 import { daysBetween, isCalendarDay } from "./lib/dates";
 import { assertSameHousehold, requireMember, type Member } from "./lib/membership";
 import { isLaterSlot, type MainSlot, type MealSlot } from "./lib/slots";
+import { regenerateShopping } from "./shopping";
 
 /**
  * The day plan (#23, #24; decisions #8 and #5): Planned Meals in Lunch,
@@ -216,7 +217,7 @@ export async function addFor(
   }
   const portions = await defaultPortionsOf(ctx, member);
   const order = await nextOrder(ctx, member.household, date, slot);
-  return await ctx.db.insert("plannedMeals", {
+  const id = await ctx.db.insert("plannedMeals", {
     household: member.household,
     date,
     slot,
@@ -225,6 +226,8 @@ export async function addFor(
     portions,
     ...(slot === "special" && { occasion: cleanOccasion(occasion) }),
   });
+  await regenerateShopping(ctx, member.household);
+  return id;
 }
 
 /** The Portions stepper on a Planned Meal card and in its detail sheet. */
@@ -242,6 +245,7 @@ export async function setPortionsFor(
   await loadMeal(ctx, member, mealId);
   validatePortions(portions);
   await ctx.db.patch("plannedMeals", mealId, { portions });
+  await regenerateShopping(ctx, member.household);
   return null;
 }
 
@@ -278,6 +282,7 @@ export async function removeFor(
   await loadMeal(ctx, member, mealId);
   for (const l of await leftoversOf(ctx, mealId)) await ctx.db.delete("leftoverPortions", l._id);
   await ctx.db.delete("plannedMeals", mealId);
+  await regenerateShopping(ctx, member.household);
   return null;
 }
 

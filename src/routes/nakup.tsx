@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Placeholder } from "~/components/AppLayout";
+import { ShoppingList } from "~/components/shopping/ShoppingList";
 
 export const Route = createFileRoute("/nakup")({
-  component: () => <Placeholder title="Nákup" text="Tady bude nákupní seznam." />,
+  component: ShoppingList,
 });

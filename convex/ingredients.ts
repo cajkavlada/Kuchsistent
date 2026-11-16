@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { regenerateShopping } from "./shopping";
 import {
   MAX_INGREDIENT_NAME,
   cleanIngredientName,
@@ -139,6 +140,8 @@ export async function updateFor(
     measureKind: edit.measureKind,
     neverBuy: edit.neverBuy,
   });
+  // Name, Measure Kind and Never Buy change the shopping list (#7).
+  await regenerateShopping(ctx, member.household);
   return null;
 }
 
@@ -164,5 +167,6 @@ export async function mergeFor(
     await ctx.db.patch("ingredientLines", line._id, { ingredient: into });
   }
   await ctx.db.delete("ingredients", from);
+  await regenerateShopping(ctx, member.household);
   return null;
 }
