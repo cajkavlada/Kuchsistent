@@ -1,1 +1,10 @@
 .wayfinder/
+node_modules/
+.output/
+.nitro/
+.tanstack/
+.vercel/
+dist/
+.env
+.env.local
+.env*.local
