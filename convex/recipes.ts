@@ -16,7 +16,6 @@ import {
   ingredientKey,
   vFreshnessClass,
   vMeasureKind,
-  vProposal,
   vStoreSection,
   type Proposal,
 } from "./lib/ingredients";
@@ -27,7 +26,8 @@ import { assertSameHousehold, requireMember, type Member } from "./lib/membershi
  * Recipe capture (#17): upload photos, read them into a Draft Recipe with an
  * AI model (`extractNode.run`), review the summary and save a confirmed Recipe.
  * Lines are matched to Household Ingredients (#19); new Ingredients the AI
- * proposes wait in the check queue and are created on save.
+ * proposes are shown with a "nová" badge, editable in the line sheet, and
+ * created on save.
  */
 
 export const MAX_PHOTOS = 10;
@@ -41,13 +41,22 @@ const MAX_LINES = 200;
 export const STALE_EXTRACTION_MS = 15 * 60 * 1000;
 
 const vCategory = v.union(v.literal("main"), v.literal("special"));
-/** A line as edited in the line sheet; `ingredientName` "" leaves it unmapped. */
+/**
+ * A line as edited in the line sheet; `ingredientName` "" leaves it unmapped.
+ * `newIngredient` sets the details of the new Ingredient the line proposes.
+ */
+const vNewIngredientFields = v.object({
+  freshnessClass: vFreshnessClass,
+  storeSection: vStoreSection,
+  measureKind: vMeasureKind,
+});
 const vDraftLine = v.object({
   raw: v.string(),
   amount: v.optional(v.number()),
   unit: v.optional(v.string()),
   ingredientName: v.optional(v.string()),
   optional: v.optional(v.boolean()),
+  newIngredient: v.optional(vNewIngredientFields),
 });
 /** A line as read by the AI, before matching. */
 const vReadLine = v.object({
@@ -87,12 +96,14 @@ function checkServings(servings: number | undefined): number | undefined {
   return servings;
 }
 
+type NewIngredientFields = Omit<Proposal, "name">;
 type LineInput = {
   raw: string;
   amount?: number;
   unit?: string;
   ingredientName?: string;
   optional?: boolean;
+  newIngredient?: NewIngredientFields;
 };
 
 function cleanLine(line: LineInput) {
@@ -141,8 +152,11 @@ async function mappingForName(
   const sibling = (await linesOf(ctx, recipeId)).find(
     (l) => l.proposed && ingredientKey(l.proposed.name) === key,
   );
-  if (sibling?.proposed) return { proposed: { ...sibling.proposed, name: cleanIngredientName(name) } };
-  return { proposed: { ...defaultProposal(name, unit), approved: false } };
+  if (sibling?.proposed) {
+    const { freshnessClass, storeSection, measureKind } = sibling.proposed;
+    return { proposed: { name: cleanIngredientName(name), freshnessClass, storeSection, measureKind } };
+  }
+  return { proposed: defaultProposal(name, unit) };
 }
 
 function cleanSteps(steps: string[]): string[] {
@@ -386,7 +400,7 @@ export const applyMatching = internalMutation({
       if (!m) continue;
       await ctx.db.patch("ingredientLines", line._id, {
         ingredient: m.ingredient,
-        proposed: m.proposed ? { ...m.proposed, approved: false } : undefined,
+        proposed: m.proposed,
       });
     }
     await ctx.db.patch("recipes", recipeId, {
@@ -470,7 +484,15 @@ export async function lineViewsFor(ctx: QueryCtx, member: Member, recipeId: Id<"
       unit: l.unit,
       optional: l.optional ?? false,
       ingredient: ing ? { _id: ing._id, name: ing.name } : null,
-      proposed: !ing && l.proposed ? l.proposed : null,
+      proposed:
+        !ing && l.proposed
+          ? {
+              name: l.proposed.name,
+              freshnessClass: l.proposed.freshnessClass,
+              storeSection: l.proposed.storeSection,
+              measureKind: l.proposed.measureKind,
+            }
+          : null,
     };
   });
 }
@@ -576,13 +598,15 @@ export async function addLineFor(
   if (lines.length >= MAX_LINES) throw new ConvexError({ code: "INVALID_LINE" });
   const order = lines.length ? lines[lines.length - 1].order + 1 : 0;
   const clean = cleanLine(line);
-  return await ctx.db.insert("ingredientLines", {
+  const lineId = await ctx.db.insert("ingredientLines", {
     recipe: recipeId,
     order,
     ...clean,
     optional: line.optional ?? false,
     ...(await mappingForName(ctx, member, recipeId, line.ingredientName ?? "", clean.unit)),
   });
+  if (line.newIngredient) await setNewIngredient(ctx, lineId, line.newIngredient);
+  return lineId;
 }
 
 async function loadEditableLine(
@@ -613,7 +637,7 @@ export async function updateLineFor(
   if (line.optional !== undefined) patch.optional = line.optional;
   if (line.ingredientName !== undefined) {
     const current = await currentName(ctx, old);
-    // Keep the mapping (and an approved proposal) unless the name changed.
+    // Keep the mapping (and an edited proposal) unless the name changed.
     if (ingredientKey(line.ingredientName) !== ingredientKey(current)) {
       const m = await mappingForName(ctx, member, old.recipe, line.ingredientName, unit);
       patch.ingredient = m.ingredient;
@@ -621,6 +645,7 @@ export async function updateLineFor(
     }
   }
   await ctx.db.patch("ingredientLines", lineId, patch);
+  if (line.newIngredient) await setNewIngredient(ctx, lineId, line.newIngredient);
   return null;
 }
 
@@ -640,7 +665,7 @@ export async function deleteLineFor(
   return null;
 }
 
-// ---------- the check queue: "Nová surovina" ----------
+// ---------- new Ingredients ----------
 
 /** The Ingredient name a line points at now (existing or proposed). */
 async function currentName(ctx: QueryCtx, line: Doc<"ingredientLines">): Promise<string> {
@@ -658,36 +683,26 @@ async function sameProposal(ctx: QueryCtx, line: Doc<"ingredientLines">) {
 }
 
 /**
- * "✓ Přidat surovinu": accepts the (possibly edited) new Ingredient for every
- * line of the draft that proposes it. A name that already exists maps the
- * lines to that Ingredient instead.
+ * Sets the details of the new Ingredient a line proposes, on every line of
+ * the draft proposing the same name. No-op if the line maps to an existing one.
  */
-export const approveNewIngredient = mutation({
-  args: { lineId: v.id("ingredientLines"), proposal: vProposal },
-  returns: v.null(),
-  handler: async (ctx, args) => approveNewIngredientFor(ctx, await requireMember(ctx), args),
-});
-
-export async function approveNewIngredientFor(
+async function setNewIngredient(
   ctx: MutationCtx,
-  member: Member,
-  { lineId, proposal }: { lineId: Id<"ingredientLines">; proposal: Proposal },
-): Promise<null> {
-  const line = await loadEditableLine(ctx, member, lineId);
-  if (!line.proposed) throw new ConvexError({ code: "NOT_NEW" });
-  const name = cleanIngredientName(proposal.name);
-  if (!name) throw new ConvexError({ code: "INVALID_INGREDIENT" });
-  const existing = (await catalogueByKey(ctx, member.household)).get(ingredientKey(name));
+  lineId: Id<"ingredientLines">,
+  fields: NewIngredientFields,
+) {
+  const line = await ctx.db.get("ingredientLines", lineId);
+  if (!line?.proposed) return;
   for (const l of await sameProposal(ctx, line)) {
-    await ctx.db.patch(
-      "ingredientLines",
-      l._id,
-      existing
-        ? { ingredient: existing._id, proposed: undefined }
-        : { ingredient: undefined, proposed: { ...proposal, name, approved: true } },
-    );
+    await ctx.db.patch("ingredientLines", l._id, {
+      proposed: {
+        name: l.proposed!.name,
+        freshnessClass: fields.freshnessClass,
+        storeSection: fields.storeSection,
+        measureKind: fields.measureKind,
+      },
+    });
   }
-  return null;
 }
 
 /**
@@ -739,12 +754,6 @@ export async function confirmFor(
     (await catalogueOf(ctx, member.household)).map((i) => [ingredientKey(i.name), i._id]),
   );
   const lines = await linesOf(ctx, recipeId);
-  // The check queue must be empty: every proposed Ingredient approved.
-  for (const l of lines) {
-    if (l.proposed && !l.proposed.approved && !byKey.has(ingredientKey(l.proposed.name))) {
-      throw new ConvexError({ code: "QUEUE_NOT_EMPTY" });
-    }
-  }
   // New Ingredients are created on save, once per name.
   for (const l of lines) {
     if (!l.proposed) continue;

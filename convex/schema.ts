@@ -95,7 +95,7 @@ export default defineSchema({
    * An Ingredient Line as printed (`raw`), plus the parsed amount and unit
    * (kept as written, e.g. `dkg`), mapped to a Household Ingredient (#19).
    * On a Draft Recipe a line may instead carry `proposed`: a new Ingredient
-   * the AI guessed, created on save once the user approved it.
+   * the AI guessed (editable in the line sheet), created when the Recipe is saved.
    */
   ingredientLines: defineTable({
     recipe: v.id("recipes"),
@@ -106,7 +106,13 @@ export default defineSchema({
     ingredient: v.optional(v.id("ingredients")),
     /** Optional Line ("případně", "na ozdobu"); unset on lines saved before #19. */
     optional: v.optional(v.boolean()),
-    proposed: v.optional(v.object({ ...vProposal.fields, approved: v.boolean() })),
+    proposed: v.optional(
+      v.object({
+        ...vProposal.fields,
+        /** Unused: new Ingredients no longer need approving. Drop once no draft carries it. */
+        approved: v.optional(v.boolean()),
+      }),
+    ),
   })
     .index("by_recipe", ["recipe", "order"])
     .index("by_ingredient", ["ingredient"]),

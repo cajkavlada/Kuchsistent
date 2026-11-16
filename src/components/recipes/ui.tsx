@@ -75,29 +75,57 @@ export function ScanView({ photoUrl, stage }: { photoUrl: string | null; stage: 
 
 type Photo = { _id: string; url: string | null };
 
-/** Recipe Photos pinned at the top of the screen; zoomable, tap for full screen. */
+/**
+ * Recipe Photos at the top of the screen. Small by default: the user usually
+ * has the book next to the phone. "Zvětšit" pins a larger, zoomable pane;
+ * "Celá obrazovka" (or tapping the photo) opens all pages full screen.
+ */
 export function PhotoPane({ photos }: { photos: Photo[] }) {
+  const [size, setSize] = useState<"small" | "large">("small");
   const [zoom, setZoom] = useState(false);
   const [viewer, setViewer] = useState(false);
   const first = photos[0];
   if (!first?.url) return null;
+  const pages = photos.length > 1 ? ` (${photos.length} str.)` : "";
   return (
     <>
-      <div className="photopane">
-        <div className={`photoscroll${zoom ? " zoom" : ""}`}>
-          <img src={first.url} alt="Fotka receptu" onClick={() => setViewer(true)} />
-        </div>
-        <div className="pctl">
-          <button type="button" onClick={() => setZoom((z) => !z)}>
-            {zoom ? "− zmenšit" : "＋ zvětšit"}
+      {size === "small" ? (
+        <div className="photostrip">
+          <button type="button" className="pthumb" onClick={() => setViewer(true)} aria-label="Fotka na celou obrazovku">
+            <img src={first.url} alt="Fotka receptu" />
           </button>
-          {photos.length > 1 && (
-            <button type="button" onClick={() => setViewer(true)}>
-              {photos.length} str.
-            </button>
-          )}
+          <span className="muted small grow">Fotka receptu{pages}</span>
+          <button type="button" className="chip" onClick={() => setSize("large")}>
+            Zvětšit
+          </button>
+          <button type="button" className="chip" onClick={() => setViewer(true)} aria-label="Celá obrazovka">
+            ⛶
+          </button>
         </div>
-      </div>
+      ) : (
+        <div className="photopane">
+          <div className={`photoscroll${zoom ? " zoom" : ""}`}>
+            <img src={first.url} alt="Fotka receptu" onClick={() => setViewer(true)} />
+          </div>
+          <div className="pctl">
+            <button type="button" onClick={() => setZoom((z) => !z)}>
+              {zoom ? "− detail" : "＋ detail"}
+            </button>
+            <button type="button" onClick={() => setViewer(true)}>
+              ⛶ Celá obrazovka{pages}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSize("small");
+                setZoom(false);
+              }}
+            >
+              Zmenšit
+            </button>
+          </div>
+        </div>
+      )}
       {viewer && <PhotoViewer photos={photos} onClose={() => setViewer(false)} />}
     </>
   );

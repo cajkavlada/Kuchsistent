@@ -3,7 +3,7 @@ import { useMutation } from "convex/react";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import { CATEGORY_LABEL, errorMessage, portionsLabel } from "~/lib/format";
-import { lineIngredientName } from "./CheckQueue";
+import { lineIngredientName } from "./Ingredients";
 import { amountUnit, type RecipeView } from "./Review";
 import { PhotoPane, ScanView, TopBar } from "./ui";
 
