@@ -3,6 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { mayCreateHousehold } from "./lib/config";
+import { addSampleRecipes } from "./lib/sampleData";
 import { isTestMode } from "./lib/testMode";
 import { membershipOf, requireMember, requireUserId } from "./lib/membership";
 
@@ -121,6 +122,10 @@ export async function createHouseholdFor(
   }
   const household = await ctx.db.insert("households", { defaultPortions });
   await ctx.db.insert("memberships", { userId, household });
+  // Preview backends only: give testers Recipes to plan right away.
+  if (user.testUser === true && (await isTestMode(ctx))) {
+    await addSampleRecipes(ctx, household);
+  }
   return household;
 }
 

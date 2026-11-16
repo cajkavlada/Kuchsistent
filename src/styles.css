@@ -238,3 +238,66 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .pickl { max-height: 45vh; overflow: auto; border: 1px solid var(--line); border-radius: 12px; padding: 0 10px; }
 .pickl .sumline:first-child { border-top: 0; }
 .pickl .sumline > span:first-child { width: 90px; font-size: .75rem; white-space: normal; }
+/* ---------- day plan (#23) ---------- */
+.plan { gap: .5rem; }
+.plan-top { display: flex; align-items: center; gap: .5rem; }
+.plan-top h1 { flex: 1; margin: 0; }
+.plan-top .chip { min-height: 36px; }
+.strip {
+  display: flex; gap: 6px; overflow-x: auto; position: sticky; top: 0; z-index: 4;
+  background: var(--bg); margin: 0 -16px; padding: 6px 16px 8px; scrollbar-width: none;
+}
+.strip::-webkit-scrollbar { display: none; }
+.dchip {
+  flex: none; width: 48px; padding: 6px 0 5px; border-radius: 12px; background: #fff; border: 1px solid var(--line);
+  font: inherit; font-size: .72rem; color: var(--muted); display: flex; flex-direction: column; align-items: center;
+}
+.dchip b { font-size: 1.05rem; color: var(--fg); }
+.dchip.today { border-color: var(--green); }
+.dchip.on { background: var(--green); border-color: var(--green); color: #fff; }
+.dchip.on b { color: #fff; }
+.dots { display: flex; gap: 3px; height: 6px; margin-top: 3px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+.dots i.f { background: var(--green); }
+.dchip.on .dots i { background: rgba(255, 255, 255, .35); }
+.dchip.on .dots i.f { background: #fff; }
+.dhead { display: flex; align-items: center; gap: 8px; }
+.dhead h2 { flex: 1; text-align: center; font-size: 1.2rem; }
+.dayview { min-height: 50vh; display: flex; flex-direction: column; gap: .25rem; touch-action: pan-y; }
+.slot { display: flex; flex-direction: column; gap: 8px; }
+.mcard {
+  background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px; font: inherit; color: inherit;
+}
+.mcard .nm {
+  background: none; border: 0; padding: 4px 0; font: inherit; font-size: 1.1rem; font-weight: 600;
+  text-align: left; color: var(--fg); cursor: pointer;
+}
+.mcard .nm span { color: var(--muted); }
+.mcard.empty {
+  border: 1.5px dashed var(--line); background: transparent; color: var(--muted); min-height: 56px;
+  align-items: center; justify-content: center; flex-direction: row; gap: 4px; cursor: pointer;
+}
+.mcard.empty b { color: var(--green); }
+.line2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.addmore {
+  align-self: flex-start; background: none; border: 0; font: inherit; font-size: .9rem; color: var(--green);
+  font-weight: 600; padding: 6px 2px; min-height: 36px;
+}
+.pstep { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: #fff; }
+.pstep button {
+  width: 42px; height: 40px; border: 0; background: none; font: inherit; font-size: 1.3rem; color: var(--fg); cursor: pointer;
+}
+.pstep button:disabled { color: var(--line); }
+.pstep output { min-width: 2ch; text-align: center; font-weight: 700; font-size: 1.05rem; }
+.srow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; }
+.pday { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 600; }
+.picklist { display: flex; flex-direction: column; }
+.pick {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 52px;
+  padding: 10px 4px; border: 0; border-top: 1px solid var(--line); background: none; font: inherit; color: inherit;
+  text-align: left; cursor: pointer;
+}
+.picklist .pick:first-child { border-top: 0; }
+.pick.chosen { border: 1.5px solid var(--green); border-radius: 12px; background: #eef3ec; padding: 10px 12px; }
+.pick:disabled { opacity: .6; }
