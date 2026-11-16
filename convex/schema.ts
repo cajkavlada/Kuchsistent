@@ -19,11 +19,13 @@ export default defineSchema({
     testUser: v.optional(v.boolean()),
   }),
 
-  /** Core data model (#5). Unnamed; usualShoppingDays arrives with shopping. */
+  /** Core data model (#5). Unnamed. */
   households: defineTable({
     defaultPortions: v.number(),
     /** Freshness Class day limits this Household changed from the defaults (#6, #22). */
     freshnessDays: v.optional(vFreshnessDays),
+    /** Days between default Shopping Trips (#7); unset = 2. */
+    tripIntervalDays: v.optional(v.number()),
   }),
 
   /** A user belongs to exactly one Household (#11). */
@@ -191,4 +193,40 @@ export default defineSchema({
   })
     .index("by_household_date", ["household", "date"])
     .index("by_source", ["sourceMeal", "date"]),
+
+  /**
+   * A Shopping Trip (#5, #7): a dated in-store run or Rohlík delivery on a
+   * Prague day. Default trips are created by regeneration (`convex/shopping.ts`).
+   */
+  shoppingTrips: defineTable({
+    household: v.id("households"),
+    date: v.string(),
+    kind: v.union(v.literal("store"), v.literal("rohlik")),
+    status: v.union(v.literal("planned"), v.literal("done")),
+  }).index("by_household_date", ["household", "date"]),
+
+  /**
+   * A Shopping Item on a trip (#5, #7). Generated items carry the Planned
+   * Meals that need them (`sourceMeals`) and are rewritten by regeneration
+   * while unchecked; Manual Shopping Items have no Ingredient or sources.
+   * `amount`/`unit` is the total in a base unit (g, ml, ks) or a unit that
+   * doesn't convert; `moreAmounts` holds clashing kinds ("+ 1 hrnek", #6).
+   * No amount = vague ("—").
+   */
+  shoppingItems: defineTable({
+    household: v.id("households"),
+    trip: v.id("shoppingTrips"),
+    ingredient: v.optional(v.id("ingredients")),
+    label: v.string(),
+    amount: v.optional(v.number()),
+    unit: v.optional(v.string()),
+    moreAmounts: v.optional(v.array(v.object({ amount: v.number(), unit: v.string() }))),
+    checked: v.boolean(),
+    manual: v.boolean(),
+    sourceMeals: v.array(v.id("plannedMeals")),
+    pinned: v.boolean(),
+    note: v.optional(v.string()),
+  })
+    .index("by_household", ["household"])
+    .index("by_trip", ["trip"]),
 });

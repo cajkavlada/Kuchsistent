@@ -22,6 +22,7 @@ import {
 } from "./lib/ingredients";
 import { mapLines } from "./lib/matching";
 import { assertSameHousehold, requireMember, type Member } from "./lib/membership";
+import { regenerateShopping } from "./shopping";
 
 /**
  * Recipe capture (#17): upload photos, read them into a Draft Recipe with an
@@ -886,6 +887,7 @@ export async function updateBasicsFor(
     category,
     baseServings: checkServings(baseServings),
   });
+  await afterRecipeEdit(ctx, member, recipeId);
   return null;
 }
 
@@ -975,7 +977,14 @@ export async function addLineFor(
     ...(await mappingForName(ctx, member, recipeId, line.ingredientName ?? "", clean.unit)),
   });
   if (line.newIngredient) await setNewIngredient(ctx, lineId, line.newIngredient);
+  await afterRecipeEdit(ctx, member, recipeId);
   return lineId;
+}
+
+/** A confirmed Recipe may be planned: its edits change the shopping list (#7). */
+async function afterRecipeEdit(ctx: MutationCtx, member: Member, recipeId: Id<"recipes">) {
+  const recipe = await ctx.db.get("recipes", recipeId);
+  if (recipe?.status === "confirmed") await regenerateShopping(ctx, member.household);
 }
 
 async function loadEditableLine(
@@ -1016,6 +1025,7 @@ export async function updateLineFor(
   }
   await ctx.db.patch("ingredientLines", lineId, patch);
   if (line.newIngredient) await setNewIngredient(ctx, lineId, line.newIngredient);
+  await afterRecipeEdit(ctx, member, old.recipe);
   return null;
 }
 
@@ -1030,8 +1040,9 @@ export async function deleteLineFor(
   member: Member,
   { lineId }: { lineId: Id<"ingredientLines"> },
 ): Promise<null> {
-  await loadEditableLine(ctx, member, lineId);
+  const line = await loadEditableLine(ctx, member, lineId);
   await ctx.db.delete("ingredientLines", lineId);
+  await afterRecipeEdit(ctx, member, line.recipe);
   return null;
 }
 
@@ -1097,6 +1108,7 @@ export async function mapToIngredientFor(
   for (const l of targets) {
     await ctx.db.patch("ingredientLines", l._id, { ingredient: ingredientId, proposed: undefined });
   }
+  await afterRecipeEdit(ctx, member, line.recipe);
   return null;
 }
 

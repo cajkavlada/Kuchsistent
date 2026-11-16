@@ -23,11 +23,13 @@ import type * as lib_inviteCode from "../lib/inviteCode.js";
 import type * as lib_matching from "../lib/matching.js";
 import type * as lib_membership from "../lib/membership.js";
 import type * as lib_sampleData from "../lib/sampleData.js";
+import type * as lib_shopping from "../lib/shopping.js";
 import type * as lib_slots from "../lib/slots.js";
 import type * as lib_testMode from "../lib/testMode.js";
 import type * as plan from "../plan.js";
 import type * as recipes from "../recipes.js";
 import type * as seed from "../seed.js";
+import type * as shopping from "../shopping.js";
 import type * as testLogin from "../testLogin.js";
 import type * as users from "../users.js";
 
@@ -54,11 +56,13 @@ import type * as users from "../users.js";
 "lib/matching": typeof lib_matching,
 "lib/membership": typeof lib_membership,
 "lib/sampleData": typeof lib_sampleData,
+"lib/shopping": typeof lib_shopping,
 "lib/slots": typeof lib_slots,
 "lib/testMode": typeof lib_testMode,
 "plan": typeof plan,
 "recipes": typeof recipes,
 "seed": typeof seed,
+"shopping": typeof shopping,
 "testLogin": typeof testLogin,
 "users": typeof users,
   }>;
