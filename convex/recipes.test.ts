@@ -8,7 +8,6 @@ import { createHouseholdFor } from "./households";
 import { memberOf, type Member } from "./lib/membership";
 import {
   addLineFor,
-  approveNewIngredientFor,
   confirmFor,
   lineViewsFor,
   mapToIngredientFor,
@@ -341,7 +340,7 @@ describe("review and save", () => {
   });
 });
 
-describe("matching Ingredients and the check queue", () => {
+describe("matching Ingredients and new Ingredients", () => {
   const LINES: ReadLine[] = [
     { raw: "10 dkg cibule", amount: 10, unit: "dkg", name: "cibule" },
     { raw: "5 dkg sádla", amount: 5, unit: "dkg", name: "sádlo" },
@@ -357,7 +356,6 @@ describe("matching Ingredients and the check queue", () => {
     storeSection: "meatFish" as const,
     measureKind: "weight" as const,
   };
-  const { n: _n, existing: _e, ...PROPOSAL } = SADLO;
 
   async function withCatalogue(t: T, member: Member, names: string[]) {
     return await t.run(async (ctx) => {
@@ -427,11 +425,11 @@ describe("matching Ingredients and the check queue", () => {
       [null, null, false],
     ]);
     // The model's guess for sádlo; a default guess for petrželka (no answer).
-    expect(lines[1].proposed).toMatchObject({ freshnessClass: "chilled", storeSection: "meatFish", measureKind: "weight", approved: false });
+    expect(lines[1].proposed).toMatchObject({ freshnessClass: "chilled", storeSection: "meatFish", measureKind: "weight" });
     expect(lines[3].proposed).toMatchObject({ freshnessClass: "longLife", storeSection: "other", measureKind: "count" });
   });
 
-  test("saving needs every new Ingredient approved, then creates each once", async () => {
+  test("saving creates each new Ingredient once, with details edited in the line sheet", async () => {
     const t = convexTest(schema, modules);
     const member = await newMember(t);
     await withCatalogue(t, member, ["cibule"]);
@@ -440,29 +438,27 @@ describe("matching Ingredients and the check queue", () => {
       items: [LINES[1], LINES[3]],
       result: { items: [{ ...SADLO, n: 0 }] },
     });
-    await expect(t.run((ctx) => confirmFor(ctx, member, { recipeId }))).rejects.toThrow(/QUEUE_NOT_EMPTY/);
-    const [, sadlo, , petrzelka] = await view(t, member, recipeId);
-    // Approving one line approves the other line proposing the same Ingredient.
+    const [, sadlo] = await view(t, member, recipeId);
+    // Editing one line's new Ingredient changes it for the other line proposing it.
     await t.run((ctx) =>
-      approveNewIngredientFor(ctx, member, {
+      updateLineFor(ctx, member, {
         lineId: sadlo._id,
-        proposal: { name: "sádlo", freshnessClass: "chilled", storeSection: "deli", measureKind: "weight" },
+        line: {
+          raw: sadlo.raw, amount: sadlo.amount, unit: sadlo.unit, ingredientName: "sádlo",
+          newIngredient: { freshnessClass: "chilled", storeSection: "deli", measureKind: "weight" },
+        },
       }),
     );
-    expect((await view(t, member, recipeId))[2].proposed).toMatchObject({ approved: true, storeSection: "deli" });
-    await expect(t.run((ctx) => confirmFor(ctx, member, { recipeId }))).rejects.toThrow(/QUEUE_NOT_EMPTY/);
-    await t.run((ctx) =>
-      approveNewIngredientFor(ctx, member, {
-        lineId: petrzelka._id,
-        proposal: { name: " petrželka ", freshnessClass: "produce", storeSection: "produce", measureKind: "count" },
-      }),
-    );
+    expect((await view(t, member, recipeId))[2].proposed).toEqual({
+      name: "sádlo", freshnessClass: "chilled", storeSection: "deli", measureKind: "weight",
+    });
+    // No approval needed: saving creates them as they stand.
     await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
     const all = await ingredientsOf(t, member);
     expect(all.map((i) => [i.name, i.freshnessClass, i.storeSection, i.measureKind, i.plenty, i.neverBuy])).toEqual([
       ["cibule", "produce", "produce", "weight", false, false],
       ["sádlo", "chilled", "deli", "weight", false, false],
-      ["petrželka", "produce", "produce", "count", false, false],
+      ["petrželka", "longLife", "other", "count", false, false],
     ]);
     const saved = await linesOf(t, recipeId);
     expect(saved.map((l) => all.find((i) => i._id === l.ingredient)?.name ?? null)).toEqual([
@@ -477,8 +473,6 @@ describe("matching Ingredients and the check queue", () => {
     const opts = { lines: [LINES[1]], items: [LINES[1]], result: { items: [{ ...SADLO, n: 0 }] } };
     const first = await readDraft(t, member, opts);
     const second = await readDraft(t, member, opts);
-    const [line] = await view(t, member, first.recipeId);
-    await t.run((ctx) => approveNewIngredientFor(ctx, member, { lineId: line._id, proposal: PROPOSAL }));
     await t.run((ctx) => confirmFor(ctx, member, { recipeId: first.recipeId }));
     const [sadlo] = await ingredientsOf(t, member);
     // The other draft, read before the save, now shows sádlo as existing and may be saved.
@@ -509,18 +503,6 @@ describe("matching Ingredients and the check queue", () => {
     expect(await ingredientsOf(t, member)).toHaveLength(1);
   });
 
-  test("approving under an existing name maps to it instead of creating a duplicate", async () => {
-    const t = convexTest(schema, modules);
-    const member = await newMember(t);
-    const [cibule] = await withCatalogue(t, member, ["cibule"]);
-    const { recipeId } = await readDraft(t, member, { lines: [{ raw: "1 cibulka", name: "cibulka" }] });
-    const [line] = await view(t, member, recipeId);
-    await t.run((ctx) =>
-      approveNewIngredientFor(ctx, member, { lineId: line._id, proposal: { ...PROPOSAL, name: "Cibule" } }),
-    );
-    expect((await view(t, member, recipeId))[0].ingredient?._id).toBe(cibule);
-  });
-
   test("the line sheet sets the Ingredient by name and toggles optional", async () => {
     const t = convexTest(schema, modules);
     const member = await newMember(t);
@@ -532,7 +514,7 @@ describe("matching Ingredients and the check queue", () => {
       updateLineFor(ctx, member, { lineId: voda._id, line: { raw: "1 l vody", amount: 1, unit: "l", ingredientName: "voda", optional: true } }),
     );
     let lines = await view(t, member, recipeId);
-    expect(lines[1]).toMatchObject({ optional: true, ingredient: null, proposed: { name: "voda", measureKind: "volume", approved: false } });
+    expect(lines[1]).toMatchObject({ optional: true, ingredient: null, proposed: { name: "voda", measureKind: "volume" } });
     await t.run((ctx) =>
       updateLineFor(ctx, member, { lineId: voda._id, line: { raw: "1 l vody", amount: 1, unit: "l", ingredientName: "Cibule " } }),
     );
@@ -540,12 +522,13 @@ describe("matching Ingredients and the check queue", () => {
     expect(lines[1]).toMatchObject({ optional: true, ingredient: { _id: cibule }, proposed: null });
     // "+ Surovina" with a name another line already proposes shares that proposal.
     await t.run((ctx) =>
-      addLineFor(ctx, member, { recipeId, line: { raw: "sůl", ingredientName: "sůl" } }),
+      addLineFor(ctx, member, {
+        recipeId,
+        line: { raw: "sůl", ingredientName: "sůl", newIngredient: { freshnessClass: "longLife", storeSection: "spices", measureKind: "weight" } },
+      }),
     );
-    const salt = (await view(t, member, recipeId))[2];
-    await t.run((ctx) => approveNewIngredientFor(ctx, member, { lineId: salt._id, proposal: { ...PROPOSAL, name: "sůl" } }));
     await t.run((ctx) => addLineFor(ctx, member, { recipeId, line: { raw: "špetka soli", ingredientName: "sůl" } }));
-    expect((await view(t, member, recipeId))[3].proposed).toMatchObject({ name: "sůl", approved: true });
+    expect((await view(t, member, recipeId))[3].proposed).toMatchObject({ name: "sůl", storeSection: "spices" });
     await t.run((ctx) => confirmFor(ctx, member, { recipeId }));
   });
 });

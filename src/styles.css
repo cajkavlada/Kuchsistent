@@ -220,13 +220,8 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .errdetail { font-size: .8rem; color: var(--muted); }
 .errdetail code { display: block; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
 
-/* Check queue (#19) */
-.qcount { margin: 0; display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; font-weight: 700; }
-.link.inline { margin: 0; font-size: .85rem; padding: 6px 0; align-self: flex-start; }
-.qcard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 12px; display: flex; flex-direction: column; gap: .7rem; }
-.qcard.new { border-color: #9cc5e8; box-shadow: 0 0 0 1px #9cc5e8; }
-.qkind { font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; color: #075985; }
-.qname { font-size: 1.15rem; font-weight: 700; }
+/* New Ingredients in review (#19) */
+.newing { background: #f0f8fe; border: 1px solid #cfe6f7; border-radius: 12px; padding: 10px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip.on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
 .chips .chip { min-height: 36px; padding: 0 12px; font-size: .9rem; font-weight: 400; }

@@ -13,38 +13,27 @@ import { errorMessage } from "~/lib/format";
 import type { RecipeView } from "./Review";
 import { Sheet } from "./ui";
 
-export type Line = RecipeView["lines"][number];
-
-/** A check-queue item; only "Nová surovina" so far (the other cards come with #20). */
-export type QueueItem = { kind: "newIngredient"; line: Line };
-
 /**
- * The check queue (#9): what needs a person before saving. One "Nová
- * surovina" per proposed Ingredient not yet approved; lines proposing the same
- * name share one card.
+ * Ingredient pieces of recipe review (#19): new Ingredients the AI proposes
+ * are created on save; the summary marks them "nová" and the line sheet edits
+ * their details or maps the line to an existing Ingredient instead.
  */
-export function checkQueue(lines: Line[]): QueueItem[] {
-  const seen = new Set<string>();
-  const out: QueueItem[] = [];
-  for (const line of lines) {
-    if (!line.proposed || line.proposed.approved) continue;
-    const key = ingredientKey(line.proposed.name);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ kind: "newIngredient", line });
-  }
-  return out;
-}
+
+export type Line = RecipeView["lines"][number];
 
 /** Ingredient name a line shows in the summary: existing, proposed, or none. */
 export const lineIngredientName = (l: Line) => l.ingredient?.name ?? l.proposed?.name ?? "";
 
-/** Badges after a line's Ingredient in the summary. */
+export type NewIngredientFields = Omit<Proposal, "name">;
+
+export const MEASURE_SHORT = { weight: "g", volume: "ml", count: "ks" } as const;
+
+/** Badges after a line's Ingredient in the summary; a new one shows how it is counted. */
 export function LineBadges({ line }: { line: Line }) {
   return (
     <>
       {line.proposed && (
-        <span className="badge b-new">{line.proposed.approved ? "nová ✓" : "nová"}</span>
+        <span className="badge b-new">nová · {MEASURE_SHORT[line.proposed.measureKind]}</span>
       )}
       {line.optional && <span className="badge b-opt">volitelné</span>}
       {!line.ingredient && !line.proposed && <span className="badge b-warn">bez suroviny</span>}
@@ -57,8 +46,8 @@ export function ProposalFields({
   value,
   onChange,
 }: {
-  value: Proposal;
-  onChange: (p: Proposal) => void;
+  value: NewIngredientFields;
+  onChange: (p: NewIngredientFields) => void;
 }) {
   return (
     <>
@@ -112,57 +101,6 @@ export function ProposalFields({
         </div>
       </div>
     </>
-  );
-}
-
-/** "Nová surovina": accept the AI's guess (edited if needed) or pick an existing one. */
-export function NewIngredientCard({ line }: { line: Line }) {
-  const approve = useMutation(api.recipes.approveNewIngredient);
-  const proposed = line.proposed!;
-  const [value, setValue] = useState<Proposal>({
-    name: proposed.name,
-    freshnessClass: proposed.freshnessClass,
-    storeSection: proposed.storeSection,
-    measureKind: proposed.measureKind,
-  });
-  const [picking, setPicking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function accept() {
-    if (!value.name.trim()) return setError("Doplň název suroviny.");
-    setBusy(true);
-    setError(null);
-    try {
-      await approve({ lineId: line._id, proposal: value });
-    } catch (err) {
-      setError(errorMessage(err));
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="qcard new">
-      <div className="qkind">＋ Nová surovina</div>
-      <input
-        className="finput qname"
-        value={value.name}
-        aria-label="Název suroviny"
-        onChange={(e) => setValue({ ...value, name: e.target.value })}
-      />
-      <small className="muted">
-        z řádku <span className="printed">„{line.raw}“</span>
-      </small>
-      <ProposalFields value={value} onChange={setValue} />
-      {error && <p className="error" role="alert">{error}</p>}
-      <button className="btn primary" disabled={busy} onClick={() => void accept()}>
-        ✓ Přidat surovinu
-      </button>
-      <button className="btn ghost" disabled={busy} onClick={() => setPicking(true)}>
-        Je to vlastně jiná surovina…
-      </button>
-      {picking && <IngredientPicker lineId={line._id} onClose={() => setPicking(false)} />}
-    </div>
   );
 }
 

@@ -11,15 +11,15 @@ import {
   parseAmount,
   portionsLabel,
 } from "~/lib/format";
-import { ingredientKey } from "@convex/lib/ingredients";
+import { defaultProposal, ingredientKey } from "@convex/lib/ingredients";
 import {
   IngredientPicker,
   LineBadges,
-  NewIngredientCard,
-  checkQueue,
+  ProposalFields,
   lineIngredientName,
   type Line,
-} from "./CheckQueue";
+  type NewIngredientFields,
+} from "./Ingredients";
 import { PhotoPane, Sheet, TopBar } from "./ui";
 
 export type RecipeView = NonNullable<FunctionReturnType<typeof api.recipes.get>>;
@@ -30,42 +30,32 @@ type SheetState =
   | { kind: "line"; line: Line | null }
   | { kind: "discard" };
 
+/** "1 nová surovina se přidá", "3 nové suroviny se přidají", "5 nových surovin se přidá". */
+function newIngredientsLabel(n: number): string {
+  if (n === 1) return "1 nová surovina se přidá do domácnosti";
+  if (n >= 2 && n <= 4) return `${n} nové suroviny se přidají do domácnosti`;
+  return `${n} nových surovin se přidá do domácnosti`;
+}
+
 export const amountUnit = (l: { amount?: number; unit?: string }) =>
   [formatAmount(l.amount), l.unit].filter(Boolean).join(" ");
 
 /**
- * Review of a Draft Recipe (#9, variant C): the photo pinned on top, then the
- * check queue one card at a time ("Ke kontrole ještě N"), then the summary:
- * name, category, portions, Ingredient Lines and steps. Tapping any summary
- * row opens an edit sheet; every edit is saved to the draft straight away.
- * Saving needs an empty check queue.
+ * Review of a Draft Recipe (#9, variant C): the photo pinned on top, then
+ * name, category, portions, Ingredient Lines and steps. Tapping any row opens
+ * an edit sheet; every edit is saved to the draft straight away. New
+ * Ingredients carry a "nová" badge and are created on save, no approval step.
  */
 export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () => void }) {
   const confirm = useMutation(api.recipes.confirm);
   const [sheet, setSheet] = useState<SheetState | null>(null);
-  const [skipped, setSkipped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const close = () => setSheet(null);
   const hasName = recipe.name.trim() !== "";
-  const queue = checkQueue(recipe.lines);
-
-  if (queue.length > 0 && !skipped) {
-    const item = queue[0];
-    return (
-      <section className="page">
-        <TopBar title={recipe.name || "Kontrola"} />
-        <PhotoPane photos={recipe.photos} />
-        <p className="qcount">
-          Ke kontrole ještě {queue.length}
-          <button className="link inline" onClick={() => setSkipped(true)}>
-            Přeskočit na shrnutí
-          </button>
-        </p>
-        <NewIngredientCard key={item.line._id} line={item.line} />
-      </section>
-    );
-  }
+  const newCount = new Set(
+    recipe.lines.flatMap((l) => (l.proposed ? [ingredientKey(l.proposed.name)] : [])),
+  ).size;
 
   async function save() {
     setBusy(true);
@@ -84,16 +74,7 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
     <section className="page with-bar">
       <TopBar title={recipe.name || "Shrnutí"} />
       <PhotoPane photos={recipe.photos} />
-      {queue.length > 0 ? (
-        <div className="banner warn frow">
-          <span className="grow">Zbývá {queue.length} k ověření.</span>
-          <button className="chip" onClick={() => setSkipped(false)}>
-            Projít
-          </button>
-        </div>
-      ) : (
-        <p className="banner">✓ Vše zkontrolováno. Ťukni na cokoli pro úpravu.</p>
-      )}
+      <p className="banner">Zkontroluj recept s fotkou. Ťukni na cokoli pro úpravu.</p>
 
       <div className="rcard">
         <button className="sumline" onClick={() => setSheet({ kind: "basics" })}>
@@ -110,6 +91,12 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
       </div>
 
       <h3 className="sec">Suroviny</h3>
+      {newCount > 0 && (
+        <p className="muted small">
+          {newIngredientsLabel(newCount)} při uložení. Ťukni na řádek pro úpravu, nebo když
+          je to vlastně jiná surovina.
+        </p>
+      )}
       <div className="rcard">
         {recipe.lines.map((l) => (
           <button key={l._id} className="sumline" onClick={() => setSheet({ kind: "line", line: l })}>
@@ -149,18 +136,8 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
         <button className="btn danger" onClick={() => setSheet({ kind: "discard" })} disabled={busy}>
           Zahodit
         </button>
-        <button
-          className="btn primary grow"
-          onClick={save}
-          disabled={busy || !hasName || queue.length > 0}
-        >
-          {busy
-            ? "Ukládám…"
-            : queue.length > 0
-              ? `Nejdřív zkontroluj (${queue.length})`
-              : hasName
-                ? "Uložit recept"
-                : "Nejdřív doplň název"}
+        <button className="btn primary grow" onClick={save} disabled={busy || !hasName}>
+          {busy ? "Ukládám…" : hasName ? "Uložit recept" : "Nejdřív doplň název"}
         </button>
       </div>
 
@@ -288,6 +265,11 @@ function LineSheet({
   const [picking, setPicking] = useState(false);
   const ingredients = useQuery(api.ingredients.list);
   const known = ingredients?.some((i) => ingredientKey(i.name) === ingredientKey(ingredientName));
+  const isNew = ingredientName.trim() !== "" && ingredients !== undefined && !known;
+  const [fields, setFields] = useState<NewIngredientFields>(() => {
+    const p = line?.proposed ?? defaultProposal("", line?.unit);
+    return { freshnessClass: p.freshnessClass, storeSection: p.storeSection, measureKind: p.measureKind };
+  });
   const { busy, error, setError, run } = useSave(onClose);
 
   function submit(e: React.FormEvent) {
@@ -303,6 +285,7 @@ function LineSheet({
       unit: unit.trim() || undefined,
       ingredientName: ingredientName.trim(),
       optional,
+      newIngredient: isNew ? fields : undefined,
     };
     void run(() => (line ? update({ lineId: line._id, line: value }) : add({ recipeId, line: value })));
   }
@@ -359,12 +342,17 @@ function LineSheet({
             <small className="muted">
               {known
                 ? "✓ Surovina domácnosti"
-                : "Nová surovina – zkontroluješ ji před uložením receptu"}
+                : "Nová surovina – přidá se do domácnosti při uložení receptu"}
             </small>
           )}
+          {isNew && (
+            <div className="newing stack">
+              <ProposalFields value={fields} onChange={setFields} />
+            </div>
+          )}
           {line && ingredients && ingredients.length > 0 && (
-            <button type="button" className="link inline" onClick={() => setPicking(true)}>
-              Vybrat ze surovin domácnosti…
+            <button type="button" className="btn ghost" onClick={() => setPicking(true)}>
+              {isNew ? "Je to vlastně jiná surovina…" : "Vybrat ze surovin domácnosti…"}
             </button>
           )}
           <label className="check">
