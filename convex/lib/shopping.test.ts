@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   canServe,
   diffParts,
+  freshnessWarning,
   portionsPhrase,
   sumParts,
   formatPart,
@@ -179,4 +180,11 @@ test("sumParts adds amounts of one kind", () => {
 
 test("portionsPhrase", () => {
   expect([1, 3, 6, 1.5].map(portionsPhrase)).toEqual(["1 porci", "3 porce", "6 porcí", "1,5 porcí"]);
+});
+
+test("freshnessWarning: furthest meal more days away than the class allows", () => {
+  expect(freshnessWarning("2026-11-16", ["2026-11-17", "2026-11-19"], 2)).toEqual({ gap: 3, max: 2 });
+  expect(freshnessWarning("2026-11-16", ["2026-11-18"], 2)).toBeNull();
+  expect(freshnessWarning("2026-11-16", ["2026-11-30"], null)).toBeNull();
+  expect(freshnessWarning("2026-11-16", [], 1)).toBeNull();
 });

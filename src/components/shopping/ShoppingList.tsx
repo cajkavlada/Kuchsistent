@@ -5,7 +5,16 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { dayLabel } from "~/lib/plan";
-import { groupBySection, itemAmount, noteTone, progress } from "~/lib/shopping";
+import {
+  freshBadge,
+  freshCount,
+  groupBySection,
+  itemAmount,
+  noteTone,
+  progress,
+  splitPlenty,
+} from "~/lib/shopping";
+import { ItemSheet } from "./ItemSheet";
 
 type List = FunctionReturnType<typeof api.shopping.list>;
 type Trip = List["trips"][number];
@@ -16,7 +25,9 @@ const FLASH_MS = 1600;
 
 /**
  * Nákup, variant A of #10: trip tabs, then one Shopping Trip grouped by
- * Store Section. Ticks are optimistic and live for both Members.
+ * Store Section, with Plenty items in a "Máme dost" box at the bottom (#29).
+ * Ticks are optimistic and live for both Members. Tapping the circle ticks;
+ * tapping the name opens the item sheet.
  */
 export function ShoppingList() {
   const data = useQuery(api.shopping.list, {});
@@ -40,8 +51,28 @@ export function ShoppingList() {
     },
   );
 
+  const setPlenty = useMutation(api.ingredients.setPlenty).withOptimisticUpdate(
+    (store, { ingredientId, plenty }) => {
+      const cur = store.getQuery(api.shopping.list, {});
+      if (cur) {
+        store.setQuery(api.shopping.list, {}, {
+          ...cur,
+          trips: cur.trips.map((t) => ({
+            ...t,
+            items: t.items.map((i) =>
+              i.ingredient === ingredientId && !i.manual
+                ? { ...i, plenty, fresh: plenty ? null : i.fresh }
+                : i,
+            ),
+          })),
+        });
+      }
+    },
+  );
+
   const { flashing, markMine } = useRemoteFlash(data);
   const [selected, setSelected] = useState<Id<"shoppingTrips"> | null>(null);
+  const [open, setOpen] = useState<Id<"shoppingItems"> | null>(null);
 
   if (data === undefined) {
     return (
@@ -77,12 +108,23 @@ export function ShoppingList() {
     markMine(item._id);
     setChecked({ itemId: item._id, checked: !item.checked }).catch(() => {});
   }
+  function plenty(ingredientId: Id<"ingredients">, value: boolean) {
+    setPlenty({ ingredientId, plenty: value }).catch(() => {});
+  }
 
   return (
     <section className="page shop">
       <h1>Nákup</h1>
       <TripTabs trips={data.trips} current={trip._id} onSelect={setSelected} />
-      <TripView trip={trip} today={data.today} flashing={flashing} onTick={tick} />
+      <TripView
+        trip={trip}
+        today={data.today}
+        flashing={flashing}
+        onTick={tick}
+        onOpen={(i) => setOpen(i._id)}
+        onRunningLow={(i) => i.ingredient && plenty(i.ingredient, false)}
+      />
+      {open && <ItemSheet itemId={open} onClose={() => setOpen(null)} onPlenty={plenty} />}
     </section>
   );
 }
@@ -103,7 +145,7 @@ function TripTabs({
   return (
     <div className="trip-tabs" role="tablist" aria-label="Nákupy">
       {trips.map((t) => {
-        const p = progress(t.items);
+        const p = progress(splitPlenty(t.items).list);
         const done = t.status === "done" || (p.total > 0 && p.left === 0);
         return (
           <button
@@ -130,14 +172,20 @@ function TripView({
   today,
   flashing,
   onTick,
+  onOpen,
+  onRunningLow,
 }: {
   trip: Trip;
   today: string;
   flashing: Set<string>;
   onTick: (item: Item) => void;
+  onOpen: (item: Item) => void;
+  onRunningLow: (item: Item) => void;
 }) {
-  const p = progress(trip.items);
-  const groups = groupBySection(trip.items);
+  const { list, plenty } = splitPlenty(trip.items);
+  const p = progress(list);
+  const warnings = freshCount(list);
+  const groups = groupBySection(list);
   return (
     <>
       <div className="trip-head">
@@ -154,8 +202,11 @@ function TripView({
       </div>
       <p className="muted small">
         {p.done} z {p.total} odškrtnuto
+        {warnings > 0 && <span className="warn-text"> · ⚠ {warnings} nebude čerstvé</span>}
       </p>
-      {groups.length === 0 && <p className="muted">Na tenhle nákup zatím nic není.</p>}
+      {groups.length === 0 && plenty.length === 0 && (
+        <p className="muted">Na tenhle nákup zatím nic není.</p>
+      )}
       {groups.map((g) => (
         <div key={g.section} className="ssec">
           <h3>
@@ -164,26 +215,89 @@ function TripView({
           <ul className="srows">
             {g.items.map((i) => (
               <li key={i._id}>
-                <button
-                  className={`srow${i.checked ? " done" : ""}${flashing.has(i._id) ? " flash" : ""}`}
-                  aria-pressed={i.checked}
-                  onClick={() => onTick(i)}
-                >
-                  <span className="ck" aria-hidden="true">
-                    {i.checked ? "✓" : ""}
-                  </span>
-                  <span className="nm">
-                    {i.label}
+                <div className={`srow${i.checked ? " done" : ""}${flashing.has(i._id) ? " flash" : ""}`}>
+                  <button
+                    className="ck"
+                    aria-pressed={i.checked}
+                    aria-label={`${i.checked ? "Odškrtnuto" : "Odškrtnout"}: ${i.label}`}
+                    onClick={() => onTick(i)}
+                  >
+                    <span className="dot" aria-hidden="true">
+                      {i.checked ? "✓" : ""}
+                    </span>
+                  </button>
+                  <button className="nm" onClick={() => onOpen(i)}>
+                    <span className="nmt">{i.label}</span>
                     {i.note && <span className={`snote ${noteTone(i.note)}`}>{i.note}</span>}
-                  </span>
+                    <Badges item={i} />
+                  </button>
                   <span className={`amt${i.amount === undefined ? " none" : ""}`}>{itemAmount(i)}</span>
-                </button>
+                </div>
               </li>
             ))}
           </ul>
         </div>
       ))}
+      {plenty.length > 0 && <PlentyBox items={plenty} onOpen={onOpen} onRunningLow={onRunningLow} />}
     </>
+  );
+}
+
+function Badges({ item }: { item: Item }) {
+  if (!item.fresh && !item.optional) return null;
+  return (
+    <span className="badges">
+      {item.fresh && <span className="bd w">{freshBadge(item.fresh)}</span>}
+      {item.optional && <span className="bd">volitelné</span>}
+    </span>
+  );
+}
+
+/**
+ * "🏠 Máme dost" (#10, #29): the trip's Plenty items, to check at home.
+ * "Dochází" clears the Ingredient's Plenty mark, so it moves up into its
+ * Store Section on every trip.
+ */
+function PlentyBox({
+  items,
+  onOpen,
+  onRunningLow,
+}: {
+  items: Item[];
+  onOpen: (item: Item) => void;
+  onRunningLow: (item: Item) => void;
+}) {
+  const [shown, setShown] = useState(true);
+  return (
+    <div className="plenty">
+      <h3>
+        <span>🏠 Máme dost · {items.length}</span>
+        <button className="mini" aria-expanded={shown} onClick={() => setShown(!shown)}>
+          {shown ? "skrýt" : "zobrazit"}
+        </button>
+      </h3>
+      {shown && (
+        <>
+          <p className="muted small">
+            Jen pro kontrolu doma. Když něco dochází, ťukni „Dochází" a přesune se to do seznamu.
+          </p>
+          <ul className="plist">
+            {[...items]
+              .sort((a, b) => a.label.localeCompare(b.label, "cs"))
+              .map((i) => (
+                <li key={i._id}>
+                  <button className="nm" onClick={() => onOpen(i)}>
+                    {i.label} <small className="muted">{i.amount === undefined ? "" : itemAmount(i)}</small>
+                  </button>
+                  <button className="mini" onClick={() => onRunningLow(i)}>
+                    Dochází
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 

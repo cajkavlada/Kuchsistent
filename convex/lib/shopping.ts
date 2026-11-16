@@ -123,6 +123,26 @@ export function formatParts(parts: Part[]): string {
   return parts.length ? parts.map(formatPart).join(" + ") : "—";
 }
 
+// ---------- marks and warnings (#29) ----------
+
+/** Bought `gap` days before its furthest meal, but the Freshness Class lasts `max`. */
+export type FreshWarning = { gap: number; max: number };
+
+/**
+ * Whether buying on `tripDate` is too early for the meals it's for (#7, #10):
+ * the furthest meal is more days away than the Freshness Class allows
+ * (`maxDays`, null = no limit). Informational only.
+ */
+export function freshnessWarning(
+  tripDate: CalendarDay,
+  mealDates: CalendarDay[],
+  maxDays: number | null,
+): FreshWarning | null {
+  if (maxDays === null || mealDates.length === 0) return null;
+  const gap = Math.max(...mealDates.map((d) => daysBetween(tripDate, d)));
+  return gap > maxDays ? { gap, max: maxDays } : null;
+}
+
 // ---------- trips ----------
 
 export type TripLike = { date: CalendarDay; kind: "store" | "rohlik"; status: "planned" | "done" };

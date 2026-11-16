@@ -6,7 +6,7 @@ import schema from "./schema";
 import { modules } from "./test.setup";
 import { createHouseholdFor } from "./households";
 import { memberOf, type Member } from "./lib/membership";
-import type { MeasureKind } from "./lib/ingredients";
+import type { FreshnessClass, MeasureKind } from "./lib/ingredients";
 import {
   addFor,
   addLeftoverFor,
@@ -15,8 +15,9 @@ import {
   setLeftoverPortionsFor,
   setPortionsFor,
 } from "./plan";
-import { mergeFor } from "./ingredients";
-import { listFor, regenerateShopping, setCheckedFor } from "./shopping";
+import { mergeFor, setPlentyFor } from "./ingredients";
+import { itemFor, listFor, regenerateShopping, removeItemFor, setCheckedFor } from "./shopping";
+import { NOT_NEEDED } from "./lib/shopping";
 
 type T = ReturnType<typeof convexTest>;
 const TODAY = "2026-11-16";
@@ -41,16 +42,22 @@ async function ingredient(
   t: T,
   m: Member,
   name: string,
-  over: { measureKind?: MeasureKind; storeSection?: "produce" | "meatFish" | "pantry"; neverBuy?: boolean } = {},
+  over: {
+    measureKind?: MeasureKind;
+    storeSection?: "produce" | "meatFish" | "pantry";
+    neverBuy?: boolean;
+    freshnessClass?: FreshnessClass;
+    plenty?: boolean;
+  } = {},
 ): Promise<Id<"ingredients">> {
   return await t.run((ctx) =>
     ctx.db.insert("ingredients", {
       household: m.household,
       name,
-      freshnessClass: "longLife",
+      freshnessClass: over.freshnessClass ?? "longLife",
       storeSection: over.storeSection ?? "pantry",
       measureKind: over.measureKind ?? "weight",
-      plenty: false,
+      plenty: over.plenty ?? false,
       neverBuy: over.neverBuy ?? false,
     }),
   );
@@ -59,7 +66,7 @@ async function ingredient(
 async function recipe(
   t: T,
   m: Member,
-  lines: { ingredient: Id<"ingredients">; amount?: number; unit?: string }[],
+  lines: { ingredient: Id<"ingredients">; amount?: number; unit?: string; optional?: boolean }[],
   baseServings?: number,
 ): Promise<Id<"recipes">> {
   return await t.run(async (ctx) => {
@@ -442,5 +449,153 @@ describe("setChecked", () => {
   test("requires sign-in", async () => {
     const t = convexTest(schema, modules);
     await expect(t.query(api.shopping.list, {})).rejects.toThrow(/UNAUTHENTICATED/);
+  });
+});
+
+describe("marks, warnings and the item sheet (#29)", () => {
+  test("an item is 'volitelné' only when every line behind it is optional", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const parsley = await ingredient(t, m, "petržel", { measureKind: "count" });
+    const lemon = await ingredient(t, m, "citron", { measureKind: "count" });
+    const garnish = await recipe(t, m, [
+      { ingredient: parsley, amount: 1, optional: true },
+      { ingredient: lemon, amount: 1, optional: true },
+    ]);
+    const main = await recipe(t, m, [{ ingredient: lemon, amount: 2 }]);
+    await meal(t, m, garnish, "2026-11-16");
+    await meal(t, m, main, "2026-11-17");
+    await regen(t, m);
+    const items = (await list(t, m)).trips[0].items;
+    expect(items.find((i) => i.label === "petržel")!.optional).toBe(true);
+    expect(items.find((i) => i.label === "citron")).toMatchObject({ optional: false, amount: 3 });
+  });
+
+  test("warns when a trip is earlier than the Freshness Class allows; checked, Plenty and unlimited don't", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    await t.run((ctx) => ctx.db.patch("households", m.household, { tripIntervalDays: 4 }));
+    const beef = await ingredient(t, m, "hovězí", { freshnessClass: "meat", storeSection: "meatFish" });
+    const rice = await ingredient(t, m, "rýže");
+    const r = await recipe(t, m, [
+      { ingredient: beef, amount: 500, unit: "g" },
+      { ingredient: rice, amount: 200, unit: "g" },
+    ]);
+    await meal(t, m, r, "2026-11-17");
+    await meal(t, m, r, "2026-11-19");
+    await regen(t, m);
+    // One trip on 16 (next is 20): beef for the 19th is 3 days early, meat lasts 2.
+    let [trip] = (await list(t, m)).trips;
+    expect(trip.date).toBe("2026-11-16");
+    expect(trip.items.find((i) => i.label === "hovězí")!.fresh).toEqual({ gap: 3, max: 2 });
+    expect(trip.items.find((i) => i.label === "rýže")!.fresh).toBeNull();
+
+    // The Household's own limit counts: meat without a limit → no warning.
+    await t.run((ctx) => ctx.db.patch("households", m.household, { freshnessDays: { meat: null } }));
+    [trip] = (await list(t, m)).trips;
+    expect(trip.items.find((i) => i.label === "hovězí")!.fresh).toBeNull();
+    await t.run((ctx) => ctx.db.patch("households", m.household, { freshnessDays: { meat: 3 } }));
+    [trip] = (await list(t, m)).trips;
+    expect(trip.items.find((i) => i.label === "hovězí")!.fresh).toBeNull();
+    await t.run((ctx) => ctx.db.patch("households", m.household, { freshnessDays: undefined }));
+
+    const beefItem = trip.items.find((i) => i.label === "hovězí")!;
+    await t.run((ctx) => setPlentyFor(ctx, m, beef, true));
+    [trip] = (await list(t, m)).trips;
+    expect(trip.items.find((i) => i.label === "hovězí")).toMatchObject({ plenty: true, fresh: null });
+    await t.run((ctx) => setPlentyFor(ctx, m, beef, false));
+    await t.run((ctx) => setCheckedFor(ctx, m, { itemId: beefItem._id, checked: true }));
+    [trip] = (await list(t, m)).trips;
+    expect(trip.items.find((i) => i.label === "hovězí")!.fresh).toBeNull();
+  });
+
+  test("Plenty is a standing mark on the Ingredient: every trip shows it, 'Dochází' clears it", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const salt = await ingredient(t, m, "sůl", { plenty: true });
+    const r = await recipe(t, m, [{ ingredient: salt, amount: 5, unit: "g" }]);
+    await meal(t, m, r, "2026-11-16");
+    await meal(t, m, r, "2026-11-18");
+    await regen(t, m);
+    let trips = (await list(t, m)).trips;
+    expect(trips).toHaveLength(2);
+    // Plenty items are still on the list (in the "Máme dost" box), on every trip.
+    expect(trips.map((x) => x.items.map((i) => [i.label, i.plenty]))).toEqual([
+      [["sůl", true]],
+      [["sůl", true]],
+    ]);
+    await t.run((ctx) => setPlentyFor(ctx, m, salt, false));
+    trips = (await list(t, m)).trips;
+    expect(trips.flatMap((x) => x.items.map((i) => i.plenty))).toEqual([false, false]);
+    expect((await t.run((ctx) => ctx.db.get("ingredients", salt)))!.plenty).toBe(false);
+  });
+
+  test("setPlenty refuses another Household's Ingredient", async () => {
+    const t = convexTest(schema, modules);
+    const a = await newMember(t, "a@example.com");
+    const b = await newMember(t, "b@example.com");
+    const salt = await ingredient(t, a, "sůl");
+    await expect(t.run((ctx) => setPlentyFor(ctx, b, salt, true))).rejects.toThrow();
+  });
+
+  test("Never Buy Ingredients never appear", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const water = await ingredient(t, m, "voda", { measureKind: "volume", neverBuy: true });
+    const r = await recipe(t, m, [{ ingredient: water, amount: 1, unit: "l" }]);
+    await meal(t, m, r, "2026-11-16");
+    await regen(t, m);
+    expect((await list(t, m)).trips.flatMap((x) => x.items)).toEqual([]);
+  });
+
+  test("the item sheet lists the meals behind an item and its trip", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const beef = await ingredient(t, m, "hovězí", { freshnessClass: "meat", storeSection: "meatFish" });
+    const r = await recipe(t, m, [{ ingredient: beef, amount: 500, unit: "g" }], 4);
+    await meal(t, m, r, "2026-11-17", 6, "dinner");
+    await meal(t, m, r, "2026-11-16", 4, "lunch");
+    await regen(t, m);
+    const [i] = await allItems(t);
+    const sheet = await t.run((ctx) => itemFor(ctx, m, i._id));
+    expect(sheet).toMatchObject({
+      label: "hovězí",
+      amount: 1250,
+      unit: "g",
+      trip: { date: "2026-11-16", kind: "store" },
+      ingredient: { name: "hovězí", storeSection: "meatFish", freshnessClass: "meat", freshnessDays: 2, plenty: false },
+      notNeeded: false,
+      fresh: null,
+    });
+    expect(sheet!.sources.map((s) => [s.recipeName, s.date, s.slot, s.portions])).toEqual([
+      ["Guláš", "2026-11-16", "lunch", 4],
+      ["Guláš", "2026-11-17", "dinner", 6],
+    ]);
+    // Not visible to another Household.
+    const other = await newMember(t, "b@example.com");
+    expect(await t.run((ctx) => itemFor(ctx, other, i._id))).toBeNull();
+  });
+
+  test("'Smazat' removes an 'už nepotřeba' item and nothing else", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const beef = await ingredient(t, m, "hovězí");
+    const r = await recipe(t, m, [{ ingredient: beef, amount: 500, unit: "g" }]);
+    await meal(t, m, r, "2026-11-16");
+    await regen(t, m);
+    const [i] = await allItems(t);
+    await expect(t.run((ctx) => removeItemFor(ctx, m, i._id))).rejects.toThrow(/ITEM_NOT_REMOVABLE/);
+    // Only partly unneeded: it still covers a meal, so it stays.
+    await t.run((ctx) => ctx.db.patch("shoppingItems", i._id, { checked: true, note: `${NOT_NEEDED}: 200 g` }));
+    await expect(t.run((ctx) => removeItemFor(ctx, m, i._id))).rejects.toThrow(/ITEM_NOT_REMOVABLE/);
+
+    await t.run((ctx) => ctx.db.patch("shoppingItems", i._id, { checked: true, note: NOT_NEEDED }));
+    expect(await t.run((ctx) => itemFor(ctx, m, i._id))).toMatchObject({ notNeeded: true, note: NOT_NEEDED });
+    const other = await newMember(t, "b@example.com");
+    await expect(t.run((ctx) => removeItemFor(ctx, other, i._id))).rejects.toThrow();
+    await t.run((ctx) => removeItemFor(ctx, m, i._id));
+    expect(await allItems(t)).toHaveLength(0);
+    // A second tap after it's gone is harmless.
+    await t.run((ctx) => removeItemFor(ctx, m, i._id));
   });
 });

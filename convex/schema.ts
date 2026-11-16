@@ -228,6 +228,8 @@ export default defineSchema({
     manual: v.boolean(),
     sourceMeals: v.array(v.id("plannedMeals")),
     pinned: v.boolean(),
+    /** Every line it comes from is an Optional Line ("volitelné", #29); unset = no. */
+    optional: v.optional(v.boolean()),
     note: v.optional(v.string()),
     topUp: v.optional(v.boolean()),
   })
