@@ -95,14 +95,20 @@ function geminiCaller(model: string): ModelCaller {
         model,
         store: false,
         system_instruction: SYSTEM_PROMPT,
+        // v1 takes the conversation as steps; the image and prompt are one user turn.
         input: [
-          ...images.map((img) => ({
-            type: "image" as const,
-            data: base64(img),
-            mime_type: "image/jpeg",
-            resolution: "ultra_high",
-          })),
-          { type: "text" as const, text: USER_PROMPT },
+          {
+            type: "user_input" as const,
+            content: [
+              ...images.map((img) => ({
+                type: "image" as const,
+                data: base64(img),
+                mime_type: "image/jpeg",
+                resolution: "ultra_high",
+              })),
+              { type: "text" as const, text: USER_PROMPT },
+            ],
+          },
         ],
         response_format: {
           type: "text",
