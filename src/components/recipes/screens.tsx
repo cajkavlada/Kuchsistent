@@ -3,10 +3,10 @@ import { useMutation } from "convex/react";
 import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
-import { CATEGORY_LABEL, errorMessage, portionsLabel, recipesLabel } from "~/lib/format";
+import { errorMessage, portionsLabel, recipesLabel } from "~/lib/format";
 import { useOnline } from "~/pwa";
-import { lineIngredientName } from "./Ingredients";
-import { amountUnit, type RecipeView } from "./Review";
+import { RecipeInfo } from "./library";
+import type { RecipeView } from "./Review";
 import { PAGE_SIDE, PhotoPane, ScanView, TopBar } from "./ui";
 
 /** The AI is reading the photos; the action finishes even if the app is closed. */
@@ -237,37 +237,25 @@ export function Saved({ recipe }: { recipe: RecipeView }) {
   );
 }
 
-/** A confirmed Recipe, read-only for now. */
+/** A confirmed Recipe: the detail sheet's content plus the steps. */
 export function RecipeDetail({ recipe }: { recipe: RecipeView }) {
   return (
     <section className="page">
       <TopBar title={recipe.name} />
-      <PhotoPane photos={recipe.photos} />
-      <p className="muted">
-        {CATEGORY_LABEL[recipe.category]}
-        {recipe.baseServings ? ` · ${portionsLabel(recipe.baseServings)}` : ""}
-      </p>
-      <Link to="/plan" search={{ naplanovat: recipe._id }} className="btn primary">
-        📅 Naplánovat
-      </Link>
-      <h3 className="sec">Suroviny</h3>
-      <div className="rcard">
-        {recipe.lines.map((l) => (
-          <div key={l._id} className="sumline">
-            <span>{amountUnit(l)}</span>
-            <span>
-              {lineIngredientName(l) || <span className="printed">{l.raw}</span>}
-              {l.optional && <small className="muted"> (volitelné)</small>}
-            </span>
-          </div>
-        ))}
-      </div>
+      <RecipeInfo recipe={recipe} onGone={() => {}} />
       <h3 className="sec">Postup</h3>
-      <ol className="steps">
-        {recipe.steps.map((s, i) => (
-          <li key={i}>{s}</li>
-        ))}
-      </ol>
+      {recipe.steps.length ? (
+        <ol className="steps">
+          {recipe.steps.map((s, i) => (
+            <li key={i}>{s}</li>
+          ))}
+        </ol>
+      ) : (
+        <p className="muted">Bez postupu.</p>
+      )}
+      {recipe.baseServings && (
+        <p className="muted small">Množství v receptu jsou na {portionsLabel(recipe.baseServings)}.</p>
+      )}
     </section>
   );
 }

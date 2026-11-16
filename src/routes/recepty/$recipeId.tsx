@@ -12,7 +12,15 @@ import {
 } from "~/components/recipes/screens";
 import { TopBar } from "~/components/recipes/ui";
 
+type RecipeSearch = {
+  /** "Upravit recept": the review summary, editing the confirmed Recipe. */
+  upravit?: boolean;
+};
+
 export const Route = createFileRoute("/recepty/$recipeId")({
+  validateSearch: (search: Record<string, unknown>): RecipeSearch => ({
+    upravit: search.upravit === true || search.upravit === "true" ? true : undefined,
+  }),
   component: RecipeScreen,
 });
 
@@ -23,6 +31,8 @@ export const Route = createFileRoute("/recepty/$recipeId")({
  */
 function RecipeScreen() {
   const { recipeId } = Route.useParams();
+  const { upravit } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const recipe = useQuery(api.recipes.get, { recipeId });
   // Which recipe was just saved: "Další z fotky" reuses this screen for the next one.
   const [justSaved, setJustSaved] = useState<string | null>(null);
@@ -43,7 +53,18 @@ function RecipeScreen() {
     );
   }
   if (recipe.status === "confirmed") {
-    return justSaved === recipe._id ? <Saved recipe={recipe} /> : <RecipeDetail recipe={recipe} />;
+    if (justSaved === recipe._id) return <Saved recipe={recipe} />;
+    if (upravit) {
+      return (
+        <Review
+          key={recipe._id}
+          recipe={recipe}
+          mode="edit"
+          onSaved={() => void navigate({ search: {}, replace: true })}
+        />
+      );
+    }
+    return <RecipeDetail recipe={recipe} />;
   }
   if (recipe.extraction?.state === "pending") return <Reading recipe={recipe} />;
   if (recipe.extraction?.state === "failed") return <ReadingFailed recipe={recipe} />;

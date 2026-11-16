@@ -58,6 +58,8 @@ const MESSAGES: Record<string, string> = {
   INVALID_PHOTOS: "Fotky se nepodařilo uložit (nejvýš 10 stránek), zkus to znovu.",
   CANNOT_RETRY: "Recept se právě čte.",
   NOT_A_DRAFT: "Recept je už uložený.",
+  NOT_CONFIRMED: "Recept ještě není uložený.",
+  WAS_PLANNED: "Recept už byl v plánu, dá se jen archivovat.",
   CHECKS_PENDING: "Nejdřív projdi, co je ke kontrole.",
   ALREADY_CHOSEN: "Recepty z fotky už jsou vybrané.",
   CHOOSE_FIRST: "Nejdřív vyber, které recepty z fotky chceš.",

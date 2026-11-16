@@ -67,6 +67,11 @@ export default defineSchema({
     status: v.union(v.literal("draft"), v.literal("confirmed")),
     archived: v.boolean(),
     /**
+     * Favourite Recipe (#25): one ★ for the whole Household. Optional only so
+     * Recipes saved before #25 stay valid; unset means not a favourite.
+     */
+    favourite: v.optional(v.boolean()),
+    /**
      * Servings the book's amounts are for; unset when the book gives none
      * (counts as the Household default, never scaled, until filled in).
      */

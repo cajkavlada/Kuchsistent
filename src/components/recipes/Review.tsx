@@ -50,8 +50,22 @@ export const amountUnit = (l: { amount?: number; unit?: string }) =>
  * New Ingredients carry a "nová" badge and are created on save, no approval
  * step. Saving needs an empty check queue.
  */
-export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () => void }) {
+export function Review({
+  recipe,
+  onSaved,
+  mode = "review",
+}: {
+  recipe: RecipeView;
+  onSaved: () => void;
+  /**
+   * "edit": "Upravit recept" on a confirmed Recipe (#25). No check queue (it
+   * was cleared on save) and no discarding; "Hotovo" creates new Ingredients.
+   */
+  mode?: "review" | "edit";
+}) {
   const confirm = useMutation(api.recipes.confirm);
+  const saveEdits = useMutation(api.recipes.saveEdits);
+  const editing = mode === "edit";
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [skipped, setSkipped] = useState(false);
   const others = (recipe.spread?.drafts.length ?? 1) - 1;
@@ -66,7 +80,7 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
   const [error, setError] = useState<string | null>(null);
   const close = () => setSheet(null);
   const hasName = recipe.name.trim() !== "";
-  const queue = checkQueue(recipe);
+  const queue = editing ? [] : checkQueue(recipe);
 
   if (queue.length > 0 && !skipped) {
     return (
@@ -93,7 +107,7 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
     setBusy(true);
     setError(null);
     try {
-      await confirm({ recipeId: recipe._id });
+      await (editing ? saveEdits : confirm)({ recipeId: recipe._id });
       onSaved();
     } catch (err) {
       setError(errorMessage(err));
@@ -104,7 +118,7 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
 
   return (
     <section className="page with-bar">
-      <TopBar title={recipe.name || (recipe.photos.length ? "Shrnutí" : "Nový recept")} />
+      <TopBar title={editing ? "Upravit recept" : recipe.name || (recipe.photos.length ? "Shrnutí" : "Nový recept")} />
       <PhotoPane photos={recipe.photos} />
       {queue.length > 0 ? (
         <div className="banner warn frow">
@@ -114,7 +128,11 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
           </button>
         </div>
       ) : (
-        <p className="banner">✓ Vše zkontrolováno. Ťukni na cokoli pro úpravu.</p>
+        <p className="banner">
+          {editing
+            ? "Ťukni na cokoli pro úpravu. Změny se ukládají hned."
+            : "✓ Vše zkontrolováno. Ťukni na cokoli pro úpravu."}
+        </p>
       )}
       {fromPhoto}
 
@@ -187,9 +205,11 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
       {error && <p className="error" role="alert">{error}</p>}
 
       <div className="bottombar">
-        <button className="btn danger" onClick={() => setSheet({ kind: "discard" })} disabled={busy}>
-          Zahodit
-        </button>
+        {!editing && (
+          <button className="btn danger" onClick={() => setSheet({ kind: "discard" })} disabled={busy}>
+            Zahodit
+          </button>
+        )}
         <button
           className="btn primary grow"
           onClick={save}
@@ -200,7 +220,9 @@ export function Review({ recipe, onSaved }: { recipe: RecipeView; onSaved: () =>
             : queue.length > 0
               ? `Nejdřív zkontroluj (${queue.length})`
               : hasName
-                ? "Uložit recept"
+                ? editing
+                  ? "Hotovo"
+                  : "Uložit recept"
                 : "Nejdřív doplň název"}
         </button>
       </div>

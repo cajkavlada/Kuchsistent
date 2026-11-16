@@ -310,6 +310,7 @@ const recipeId = await ctx.db.insert("recipes", {
   category: "main",
   status: "draft",
   archived: false,
+  favourite: false,
   steps: [],
 });
 for (const [order, storageId] of storageIds.entries()) {
@@ -372,6 +373,7 @@ export async function createManualFor(ctx: MutationCtx, member: Member): Promise
     category: "main",
     status: "draft",
     archived: false,
+    favourite: false,
     steps: [],
   });
 }
@@ -676,37 +678,86 @@ async function firstPhotoUrl(ctx: QueryCtx, recipeId: Id<"recipes">) {
   return photo ? await ctx.storage.getUrl(photo.storageId) : null;
 }
 
-/** The library: confirmed Recipes (A–Z) and drafts in progress (newest first). */
+/**
+ * Every date the Household planned each Recipe on, ascending. Cooking History
+ * is derived from these on the client: dates before today were cooked, the
+ * rest are coming up (#12). Leftover Portions live in their own table, so
+ * they never count as a cooking.
+ */
+async function mealDatesByRecipe(ctx: QueryCtx, household: Id<"households">) {
+  const meals = await ctx.db
+    .query("plannedMeals")
+    .withIndex("by_household_date", (q) => q.eq("household", household))
+    .collect();
+  const out = new Map<Id<"recipes">, string[]>();
+  for (const m of meals) {
+    const dates = out.get(m.recipe);
+    if (dates) dates.push(m.date);
+    else out.set(m.recipe, [m.date]);
+  }
+  return out;
+}
+
+/** Distinct Ingredient names a Recipe uses (a proposal counts by its name). */
+function ingredientNamesOf(
+  lines: Doc<"ingredientLines">[],
+  names: Map<Id<"ingredients">, string>,
+): string[] {
+  const out = new Set<string>();
+  for (const l of lines) {
+    const name = (l.ingredient && names.get(l.ingredient)) || l.proposed?.name;
+    if (name) out.add(name);
+  }
+  return [...out];
+}
+
+/**
+ * The library (#25): confirmed, non-archived Recipes (A–Z) with what the
+ * shelves, search and ingredient filter need, and drafts (newest first),
+ * which stay under "Rozpracované" and never reach the shelves.
+ */
 export const library = query({
   args: {},
-  handler: async (ctx) => {
-    const { household } = await requireMember(ctx);
-    const byStatus = (status: "draft" | "confirmed") =>
-      ctx.db
-        .query("recipes")
-        .withIndex("by_household_status", (q) =>
-          q.eq("household", household).eq("status", status),
-        )
-        .collect();
-    const summary = async (r: Doc<"recipes">) => ({
-      _id: r._id,
-      _creationTime: r._creationTime,
-      name: r.name,
-      category: r.category,
-      baseServings: r.baseServings,
-      extractionState: r.extraction?.state ?? null,
-      choosing: r.spread?.choosing ?? false,
-      photoUrl: await firstPhotoUrl(ctx, r._id),
-    });
-    const confirmed = (await byStatus("confirmed")).filter((r) => !r.archived);
-    confirmed.sort((a, b) => a.name.localeCompare(b.name, "cs"));
-    const drafts = (await byStatus("draft")).reverse();
-    return {
-      recipes: await Promise.all(confirmed.map(summary)),
-      drafts: await Promise.all(drafts.map(summary)),
-    };
-  },
+  handler: async (ctx) => libraryFor(ctx, (await requireMember(ctx)).household),
 });
+
+export async function libraryFor(ctx: QueryCtx, household: Id<"households">) {
+  const byStatus = (status: "draft" | "confirmed") =>
+    ctx.db
+      .query("recipes")
+      .withIndex("by_household_status", (q) =>
+        q.eq("household", household).eq("status", status),
+      )
+      .collect();
+  const summary = async (r: Doc<"recipes">) => ({
+    _id: r._id,
+    _creationTime: r._creationTime,
+    name: r.name,
+    category: r.category,
+    baseServings: r.baseServings,
+    extractionState: r.extraction?.state ?? null,
+    choosing: r.spread?.choosing ?? false,
+    photoUrl: await firstPhotoUrl(ctx, r._id),
+  });
+  const names = new Map(
+    (await catalogueOf(ctx, household)).map((i) => [i._id, i.name] as const),
+  );
+  const dates = await mealDatesByRecipe(ctx, household);
+  const confirmed = (await byStatus("confirmed")).filter((r) => !r.archived);
+  confirmed.sort((a, b) => a.name.localeCompare(b.name, "cs"));
+  const drafts = (await byStatus("draft")).filter((r) => !r.archived).reverse();
+  return {
+    recipes: await Promise.all(
+      confirmed.map(async (r) => ({
+        ...(await summary(r)),
+        favourite: r.favourite ?? false,
+        ingredients: ingredientNamesOf(await linesOf(ctx, r._id), names),
+        mealDates: dates.get(r._id) ?? [],
+      })),
+    ),
+    drafts: await Promise.all(drafts.map(summary)),
+  };
+}
 
 /**
  * Ingredient Lines for the UI, each with its Ingredient or the proposed new
@@ -758,6 +809,12 @@ export const get = query({
       })),
     );
     const lines = await lineViewsFor(ctx, member, recipeId);
+    const meals = await ctx.db
+      .query("plannedMeals")
+      .withIndex("by_household_recipe_date", (q) =>
+        q.eq("household", member.household).eq("recipe", recipeId),
+      )
+      .collect();
     const e = recipe.extraction;
     // Drafts still waiting from the same photo, for the chooser and "Další z fotky".
     const fromPhoto = recipe.spread
@@ -774,10 +831,14 @@ export const get = query({
       : [];
     return {
       _id: recipe._id,
+      _creationTime: recipe._creationTime,
       name: recipe.name,
       category: recipe.category,
       status: recipe.status,
       archived: recipe.archived,
+      favourite: recipe.favourite ?? false,
+      /** Planned Meal dates, ascending: the Cooking History source (#12). */
+      mealDates: meals.map((m) => m.date),
       baseServings: recipe.baseServings,
       servingsUnknown: recipe.servingsUnknown ?? false,
       continuesOffPage: recipe.continuesOffPage ?? false,
@@ -1041,6 +1102,38 @@ export async function mapToIngredientFor(
 
 // ---------- save / discard ----------
 
+/** New Ingredients the lines propose are created (once per name) and mapped. */
+async function createProposedIngredients(
+  ctx: MutationCtx,
+  member: Member,
+  recipeId: Id<"recipes">,
+): Promise<void> {
+  const lines = await linesOf(ctx, recipeId);
+  const byKey = new Map(
+    (await catalogueOf(ctx, member.household)).map((i) => [ingredientKey(i.name), i._id]),
+  );
+  // New Ingredients are created on save, once per name.
+  for (const l of lines) {
+    if (!l.proposed) continue;
+    const key = ingredientKey(l.proposed.name);
+    let id = byKey.get(key);
+    if (id === undefined) {
+      const { name, freshnessClass, storeSection, measureKind } = l.proposed;
+      id = await ctx.db.insert("ingredients", {
+        household: member.household,
+        name: cleanIngredientName(name),
+        freshnessClass,
+        storeSection,
+        measureKind,
+        plenty: false,
+        neverBuy: false,
+      });
+      byKey.set(key, id);
+    }
+    await ctx.db.patch("ingredientLines", l._id, { ingredient: id, proposed: undefined });
+  }
+}
+
 /** "Uložit recept": the draft becomes a confirmed Recipe; photos stay with it. */
 export const confirm = mutation({
   args: { recipeId: v.id("recipes") },
@@ -1066,29 +1159,7 @@ export async function confirmFor(
     lines.map((l) => ({ _id: l._id, uncertain: l.uncertain, hasIngredient: !!(l.ingredient || l.proposed) })),
   );
   if (checks.length > 0) throw new ConvexError({ code: "CHECKS_PENDING" });
-  const byKey = new Map(
-    (await catalogueOf(ctx, member.household)).map((i) => [ingredientKey(i.name), i._id]),
-  );
-  // New Ingredients are created on save, once per name.
-  for (const l of lines) {
-    if (!l.proposed) continue;
-    const key = ingredientKey(l.proposed.name);
-    let id = byKey.get(key);
-    if (id === undefined) {
-      const { name, freshnessClass, storeSection, measureKind } = l.proposed;
-      id = await ctx.db.insert("ingredients", {
-        household: member.household,
-        name: cleanIngredientName(name),
-        freshnessClass,
-        storeSection,
-        measureKind,
-        plenty: false,
-        neverBuy: false,
-      });
-      byKey.set(key, id);
-    }
-    await ctx.db.patch("ingredientLines", l._id, { ingredient: id, proposed: undefined });
-  }
+  await createProposedIngredients(ctx, member, recipeId);
   await ctx.db.patch("recipes", recipeId, {
     status: "confirmed",
     servingsUnknown: undefined,
@@ -1123,4 +1194,104 @@ async function deleteDraft(ctx: MutationCtx, recipeId: Id<"recipes">) {
   await deletePhotos(ctx, recipeId);
   // A reading run still in flight finds the recipe gone and stops.
   await ctx.db.delete("recipes", recipeId);
+}
+
+// ---------- library actions (#25) ----------
+
+async function loadConfirmed(
+  ctx: QueryCtx,
+  member: Member,
+  recipeId: Id<"recipes">,
+): Promise<Doc<"recipes">> {
+  const recipe = await loadRecipe(ctx, member, recipeId);
+  if (recipe.archived) throw new ConvexError({ code: "NOT_FOUND" });
+  if (recipe.status !== "confirmed") throw new ConvexError({ code: "NOT_CONFIRMED" });
+  return recipe;
+}
+
+/** The ★ toggle in the detail sheet; shared by the whole Household. */
+export const setFavourite = mutation({
+  args: { recipeId: v.id("recipes"), favourite: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => setFavouriteFor(ctx, await requireMember(ctx), args),
+});
+
+export async function setFavouriteFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId, favourite }: { recipeId: Id<"recipes">; favourite: boolean },
+): Promise<null> {
+  await loadConfirmed(ctx, member, recipeId);
+  await ctx.db.patch("recipes", recipeId, { favourite });
+  return null;
+}
+
+/**
+ * "Upravit recept" → "Hotovo": edits to a confirmed Recipe are saved as they
+ * are made; this creates any new Ingredients the edited lines propose.
+ */
+export const saveEdits = mutation({
+  args: { recipeId: v.id("recipes") },
+  returns: v.null(),
+  handler: async (ctx, args) => saveEditsFor(ctx, await requireMember(ctx), args),
+});
+
+export async function saveEditsFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId }: { recipeId: Id<"recipes"> },
+): Promise<null> {
+  const recipe = await loadConfirmed(ctx, member, recipeId);
+  if (!recipe.name.trim()) throw new ConvexError({ code: "NAME_REQUIRED" });
+  await createProposedIngredients(ctx, member, recipeId);
+  await ctx.db.patch("recipes", recipeId, { steps: cleanSteps(recipe.steps) });
+  return null;
+}
+
+/**
+ * "Archivovat": hidden from the library and the picker; Planned Meals that
+ * already use it keep pointing to it (#5).
+ */
+export const archive = mutation({
+  args: { recipeId: v.id("recipes") },
+  returns: v.null(),
+  handler: async (ctx, args) => archiveFor(ctx, await requireMember(ctx), args),
+});
+
+export async function archiveFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId }: { recipeId: Id<"recipes"> },
+): Promise<null> {
+  await loadConfirmed(ctx, member, recipeId);
+  await ctx.db.patch("recipes", recipeId, { archived: true, favourite: false });
+  return null;
+}
+
+/** "Smazat úplně": a hard delete, only for a Recipe that was never planned (#5). */
+export const deleteForever = mutation({
+  args: { recipeId: v.id("recipes") },
+  returns: v.null(),
+  handler: async (ctx, args) => deleteForeverFor(ctx, await requireMember(ctx), args),
+});
+
+export async function deleteForeverFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId }: { recipeId: Id<"recipes"> },
+): Promise<null> {
+  await loadConfirmed(ctx, member, recipeId);
+  const planned = await ctx.db
+    .query("plannedMeals")
+    .withIndex("by_household_recipe_date", (q) =>
+      q.eq("household", member.household).eq("recipe", recipeId),
+    )
+    .first();
+  if (planned !== null) throw new ConvexError({ code: "WAS_PLANNED" });
+  for (const line of await linesOf(ctx, recipeId)) {
+    await ctx.db.delete("ingredientLines", line._id);
+  }
+  await deletePhotos(ctx, recipeId);
+  await ctx.db.delete("recipes", recipeId);
+  return null;
 }
