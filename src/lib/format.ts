@@ -58,10 +58,19 @@ const MESSAGES: Record<string, string> = {
   CHECKS_PENDING: "Nejdřív projdi, co je ke kontrole.",
   ALREADY_CHOSEN: "Recepty z fotky už jsou vybrané.",
   CHOOSE_FIRST: "Nejdřív vyber, které recepty z fotky chceš.",
+  INGREDIENT_NAME_REQUIRED: "Doplň název suroviny.",
+  INGREDIENT_NAME_TOO_LONG: "Název suroviny je příliš dlouhý.",
+  INGREDIENT_NAME_TAKEN: "Surovina s tímto názvem už existuje. Můžeš je sloučit.",
+  MERGE_SAME: "Vyber jinou surovinu.",
+  INVALID_DAYS: "Počet dní musí být 1 až 60.",
 };
 
 /** Czech message for a failed Convex call. */
-export function errorMessage(err: unknown, fallback = "Něco se nepovedlo, zkus to znovu."): string {
+export function errorMessage(
+  err: unknown,
+  fallback = "Něco se nepovedlo, zkus to znovu.",
+  overrides: Record<string, string> = {},
+): string {
   const code = err instanceof ConvexError ? (err.data as { code?: string })?.code : undefined;
-  return (code && MESSAGES[code]) || fallback;
+  return (code && (overrides[code] ?? MESSAGES[code])) || fallback;
 }

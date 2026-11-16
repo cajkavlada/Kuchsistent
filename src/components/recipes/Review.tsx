@@ -328,6 +328,10 @@ function LineSheet({
   const [optional, setOptional] = useState(line?.optional ?? false);
   const [picking, setPicking] = useState(false);
   const ingredients = useQuery(api.ingredients.list);
+  const household = useQuery(api.households.current);
+  const days = household
+    ? Object.fromEntries(household.freshness.map((f) => [f.id, f.days]))
+    : undefined;
   const known = ingredients?.some((i) => ingredientKey(i.name) === ingredientKey(ingredientName));
   const isNew = ingredientName.trim() !== "" && ingredients !== undefined && !known;
   const [fields, setFields] = useState<NewIngredientFields>(() => {
@@ -411,7 +415,7 @@ function LineSheet({
           )}
           {isNew && (
             <div className="newing stack">
-              <ProposalFields value={fields} onChange={setFields} />
+              <ProposalFields value={fields} onChange={setFields} days={days} />
             </div>
           )}
           {line && ingredients && ingredients.length > 0 && (

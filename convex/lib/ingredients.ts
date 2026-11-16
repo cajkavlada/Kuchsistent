@@ -68,7 +68,56 @@ export type Proposal = {
   measureKind: MeasureKind;
 };
 
-export const freshnessLabel = (id: FreshnessClass) =>
+/**
+ * Per-Household overrides of the Freshness Class day limits
+ * (`households.freshnessDays`); `null` means no limit. A class missing here
+ * uses its default.
+ */
+const vDays = v.optional(v.union(v.number(), v.null()));
+export const vFreshnessDays = v.object({
+  veryFresh: vDays,
+  meat: vDays,
+  chilled: vDays,
+  produce: vDays,
+  longLife: vDays,
+});
+export type FreshnessDays = Partial<Record<FreshnessClass, number | null>>;
+
+export const MIN_FRESHNESS_DAYS = 1;
+export const MAX_FRESHNESS_DAYS = 60;
+
+export function defaultFreshnessDays(id: FreshnessClass): number | null {
+  return FRESHNESS_CLASSES.find((f) => f.id === id)?.days ?? null;
+}
+
+/** Days an Ingredient of this class may be bought before its meal, in this Household. */
+export function freshnessDaysFor(
+  overrides: FreshnessDays | undefined,
+  id: FreshnessClass,
+): number | null {
+  const own = overrides?.[id];
+  return own === undefined ? defaultFreshnessDays(id) : own;
+}
+
+/** All five classes with this Household's limits, in display order. */
+export function freshnessTable(overrides: FreshnessDays | undefined) {
+  return FRESHNESS_CLASSES.map((f) => ({
+    id: f.id as FreshnessClass,
+    label: f.label,
+    days: freshnessDaysFor(overrides, f.id),
+    defaultDays: f.days as number | null,
+  }));
+}
+
+/** "1 den", "2 dny", "5 dní", "bez limitu". */
+export function daysLabel(days: number | null): string {
+  if (days === null) return "bez limitu";
+  if (days === 1) return "1 den";
+  if (days >= 2 && days <= 4) return `${days} dny`;
+  return `${days} dní`;
+}
+
+export const freshnessLabel =(id: FreshnessClass) =>
   FRESHNESS_CLASSES.find((f) => f.id === id)?.label ?? id;
 export const sectionLabel = (id: StoreSection) =>
   STORE_SECTIONS.find((s) => s.id === id)?.label ?? id;

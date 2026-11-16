@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {
   vFreshnessClass,
+  vFreshnessDays,
   vMeasureKind,
   vProposal,
   vStoreSection,
@@ -21,6 +22,8 @@ export default defineSchema({
   /** Core data model (#5). Unnamed; usualShoppingDays arrives with shopping. */
   households: defineTable({
     defaultPortions: v.number(),
+    /** Freshness Class day limits this Household changed from the defaults (#6, #22). */
+    freshnessDays: v.optional(vFreshnessDays),
   }),
 
   /** A user belongs to exactly one Household (#11). */

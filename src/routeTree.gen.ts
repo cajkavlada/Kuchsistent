@@ -11,8 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NakupRouteImport } from './routes/nakup'
-import { Route as NastaveniRouteImport } from './routes/nastaveni'
 import { Route as PlanRouteImport } from './routes/plan'
+import { Route as NastaveniIndexRouteImport } from './routes/nastaveni/index'
+import { Route as NastaveniSurovinyRouteImport } from './routes/nastaveni/suroviny'
 import { Route as PozvankaCodeRouteImport } from './routes/pozvanka.$code'
 import { Route as ReceptyIndexRouteImport } from './routes/recepty/index'
 import { Route as ReceptyRecipeIdRouteImport } from './routes/recepty/$recipeId'
@@ -28,14 +29,19 @@ const NakupRoute = NakupRouteImport.update({
   path: '/nakup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NastaveniRoute = NastaveniRouteImport.update({
-  id: '/nastaveni',
-  path: '/nastaveni',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const PlanRoute = PlanRouteImport.update({
   id: '/plan',
   path: '/plan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NastaveniIndexRoute = NastaveniIndexRouteImport.update({
+  id: '/nastaveni/',
+  path: '/nastaveni/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NastaveniSurovinyRoute = NastaveniSurovinyRouteImport.update({
+  id: '/nastaveni/suroviny',
+  path: '/nastaveni/suroviny',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PozvankaCodeRoute = PozvankaCodeRouteImport.update({
@@ -62,32 +68,35 @@ const ReceptyVyfotitRoute = ReceptyVyfotitRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/nakup': typeof NakupRoute
-  '/nastaveni': typeof NastaveniRoute
   '/plan': typeof PlanRoute
+  '/nastaveni/suroviny': typeof NastaveniSurovinyRoute
   '/pozvanka/$code': typeof PozvankaCodeRoute
   '/recepty/$recipeId': typeof ReceptyRecipeIdRoute
   '/recepty/vyfotit': typeof ReceptyVyfotitRoute
+  '/nastaveni/': typeof NastaveniIndexRoute
   '/recepty/': typeof ReceptyIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/nakup': typeof NakupRoute
-  '/nastaveni': typeof NastaveniRoute
   '/plan': typeof PlanRoute
+  '/nastaveni/suroviny': typeof NastaveniSurovinyRoute
   '/pozvanka/$code': typeof PozvankaCodeRoute
   '/recepty/$recipeId': typeof ReceptyRecipeIdRoute
   '/recepty/vyfotit': typeof ReceptyVyfotitRoute
+  '/nastaveni': typeof NastaveniIndexRoute
   '/recepty': typeof ReceptyIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/nakup': typeof NakupRoute
-  '/nastaveni': typeof NastaveniRoute
   '/plan': typeof PlanRoute
+  '/nastaveni/suroviny': typeof NastaveniSurovinyRoute
   '/pozvanka/$code': typeof PozvankaCodeRoute
   '/recepty/$recipeId': typeof ReceptyRecipeIdRoute
   '/recepty/vyfotit': typeof ReceptyVyfotitRoute
+  '/nastaveni/': typeof NastaveniIndexRoute
   '/recepty/': typeof ReceptyIndexRoute
 }
 export interface FileRouteTypes {
@@ -95,42 +104,46 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/nakup'
-    | '/nastaveni'
     | '/plan'
+    | '/nastaveni/suroviny'
     | '/pozvanka/$code'
     | '/recepty/$recipeId'
     | '/recepty/vyfotit'
+    | '/nastaveni/'
     | '/recepty/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/nakup'
-    | '/nastaveni'
     | '/plan'
+    | '/nastaveni/suroviny'
     | '/pozvanka/$code'
     | '/recepty/$recipeId'
     | '/recepty/vyfotit'
+    | '/nastaveni'
     | '/recepty'
   id:
     | '__root__'
     | '/'
     | '/nakup'
-    | '/nastaveni'
     | '/plan'
+    | '/nastaveni/suroviny'
     | '/pozvanka/$code'
     | '/recepty/$recipeId'
     | '/recepty/vyfotit'
+    | '/nastaveni/'
     | '/recepty/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   NakupRoute: typeof NakupRoute
-  NastaveniRoute: typeof NastaveniRoute
   PlanRoute: typeof PlanRoute
+  NastaveniSurovinyRoute: typeof NastaveniSurovinyRoute
   PozvankaCodeRoute: typeof PozvankaCodeRoute
   ReceptyRecipeIdRoute: typeof ReceptyRecipeIdRoute
   ReceptyVyfotitRoute: typeof ReceptyVyfotitRoute
+  NastaveniIndexRoute: typeof NastaveniIndexRoute
   ReceptyIndexRoute: typeof ReceptyIndexRoute
 }
 
@@ -150,18 +163,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NakupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/nastaveni': {
-      id: '/nastaveni'
-      path: '/nastaveni'
-      fullPath: '/nastaveni'
-      preLoaderRoute: typeof NastaveniRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/plan': {
       id: '/plan'
       path: '/plan'
       fullPath: '/plan'
       preLoaderRoute: typeof PlanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/nastaveni/': {
+      id: '/nastaveni/'
+      path: '/nastaveni'
+      fullPath: '/nastaveni/'
+      preLoaderRoute: typeof NastaveniIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/nastaveni/suroviny': {
+      id: '/nastaveni/suroviny'
+      path: '/nastaveni/suroviny'
+      fullPath: '/nastaveni/suroviny'
+      preLoaderRoute: typeof NastaveniSurovinyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pozvanka/$code': {
@@ -198,11 +218,12 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   NakupRoute: NakupRoute,
-  NastaveniRoute: NastaveniRoute,
   PlanRoute: PlanRoute,
+  NastaveniSurovinyRoute: NastaveniSurovinyRoute,
   PozvankaCodeRoute: PozvankaCodeRoute,
   ReceptyRecipeIdRoute: ReceptyRecipeIdRoute,
   ReceptyVyfotitRoute: ReceptyVyfotitRoute,
+  NastaveniIndexRoute: NastaveniIndexRoute,
   ReceptyIndexRoute: ReceptyIndexRoute,
 }
 export const routeTree = rootRouteImport

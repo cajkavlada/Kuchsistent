@@ -7,6 +7,7 @@ import {
   MEASURE_KINDS,
   STORE_SECTIONS,
   ingredientKey,
+  type FreshnessClass,
   type Proposal,
 } from "@convex/lib/ingredients";
 import { errorMessage } from "~/lib/format";
@@ -46,16 +47,21 @@ export function LineBadges({ line }: { line: Line }) {
 export function ProposalFields({
   value,
   onChange,
+  days,
 }: {
   value: NewIngredientFields;
   onChange: (p: NewIngredientFields) => void;
+  /** The Household's day limits per Freshness Class; defaults when absent. */
+  days?: Partial<Record<FreshnessClass, number | null>>;
 }) {
   return (
     <>
       <div className="lbl">
         Čerstvost (jak dlouho vydrží po nákupu)
         <div className="chips" role="radiogroup">
-          {FRESHNESS_CLASSES.map((f) => (
+          {FRESHNESS_CLASSES.map((f) => {
+            const d = days && f.id in days ? days[f.id] : f.days;
+            return (
             <button
               key={f.id}
               type="button"
@@ -65,9 +71,10 @@ export function ProposalFields({
               onClick={() => onChange({ ...value, freshnessClass: f.id })}
             >
               {f.label}
-              {f.days !== null ? ` · ${f.days} d` : ""}
+              {d != null ? ` · ${d} d` : ""}
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
       <label className="lbl">
