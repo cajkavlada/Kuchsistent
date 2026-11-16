@@ -333,3 +333,17 @@ textarea.finput { min-height: 76px; resize: vertical; }
 .spread-pick.on { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
 .spread-pick.on .chip { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
 .spread-pick:not(.on) b { color: var(--muted); text-decoration: line-through; }
+
+/* Settings: Suroviny + Čerstvost (#22) */
+.linkcard { flex-direction: row; align-items: center; text-decoration: none; color: inherit; gap: .75rem; }
+.linkcard .grow { display: flex; flex-direction: column; gap: 4px; }
+.chev { font-size: 1.6rem; color: var(--muted); }
+.sumline.fresh { align-items: center; min-height: 48px; }
+.sumline.fresh:first-child { border-top: 0; }
+.sumline.fresh b { flex: 1; font-weight: 600; }
+.ingrow {
+  display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 52px; padding: 9px 2px;
+  border: 0; border-top: 1px solid var(--line); background: none; font: inherit; color: inherit; text-align: left;
+}
+.ingrow:first-child { border-top: 0; }
+.ingrow b { font-weight: 600; }

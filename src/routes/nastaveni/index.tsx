@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -6,8 +6,9 @@ import { api } from "@convex/_generated/api";
 import { invitePath } from "@convex/lib/inviteCode";
 import { APP_TIME_ZONE } from "@convex/lib/dates";
 import { rememberMember } from "~/pwa";
+import { FreshnessCard } from "~/components/settings/Freshness";
 
-export const Route = createFileRoute("/nastaveni")({ component: Settings });
+export const Route = createFileRoute("/nastaveni/")({ component: Settings });
 
 function Settings() {
   const { signOut } = useAuthActions();
@@ -17,6 +18,8 @@ function Settings() {
       <Members />
       <InviteCard />
       <DefaultPortions />
+      <IngredientsCard />
+      <FreshnessCard />
       <button
         className="btn"
         onClick={() => {
@@ -27,6 +30,21 @@ function Settings() {
         Odhlásit se
       </button>
     </section>
+  );
+}
+
+function IngredientsCard() {
+  const items = useQuery(api.ingredients.catalogue);
+  return (
+    <Link to="/nastaveni/suroviny" className="card linkcard">
+      <span className="grow">
+        <h2>Suroviny{items ? ` (${items.length})` : ""}</h2>
+        <span className="muted small">
+          Přejmenovat, změnit čerstvost nebo oddělení, sloučit duplicity, nikdy nekupovat.
+        </span>
+      </span>
+      <span aria-hidden="true" className="chev">›</span>
+    </Link>
   );
 }
 

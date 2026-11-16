@@ -6,6 +6,14 @@ import { mayCreateHousehold } from "./lib/config";
 import { addSampleRecipes } from "./lib/sampleData";
 import { isTestMode } from "./lib/testMode";
 import { membershipOf, requireMember, requireUserId } from "./lib/membership";
+import {
+  MAX_FRESHNESS_DAYS,
+  MIN_FRESHNESS_DAYS,
+  defaultFreshnessDays,
+  freshnessTable,
+  vFreshnessClass,
+  type FreshnessClass,
+} from "./lib/ingredients";
 
 /**
  * Where the signed-in person stands, for routing after sign-in:
@@ -34,7 +42,11 @@ export const current = query({
     const { household } = await requireMember(ctx);
     const doc = await ctx.db.get("households", household);
     if (doc === null) throw new ConvexError({ code: "NOT_FOUND" });
-    return { _id: doc._id, defaultPortions: doc.defaultPortions };
+    return {
+      _id: doc._id,
+      defaultPortions: doc.defaultPortions,
+      freshness: freshnessTable(doc.freshnessDays),
+    };
   },
 });
 
@@ -91,6 +103,41 @@ export const setDefaultPortions = mutation({
     return null;
   },
 });
+
+/**
+ * "Čerstvost" in settings (#22): a Freshness Class's day limit for this
+ * Household; `null` = no limit. Setting the default drops the override.
+ */
+export const setFreshnessDays = mutation({
+  args: { freshnessClass: vFreshnessClass, days: v.union(v.number(), v.null()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const { household } = await requireMember(ctx);
+    return await setFreshnessDaysFor(ctx, household, args);
+  },
+});
+
+export async function setFreshnessDaysFor(
+  ctx: MutationCtx,
+  household: Id<"households">,
+  { freshnessClass, days }: { freshnessClass: FreshnessClass; days: number | null },
+): Promise<null> {
+  if (
+    days !== null &&
+    (!Number.isInteger(days) || days < MIN_FRESHNESS_DAYS || days > MAX_FRESHNESS_DAYS)
+  ) {
+    throw new ConvexError({ code: "INVALID_DAYS" });
+  }
+  const doc = await ctx.db.get("households", household);
+  if (doc === null) throw new ConvexError({ code: "NOT_FOUND" });
+  const freshnessDays = { ...doc.freshnessDays };
+  if (days === defaultFreshnessDays(freshnessClass)) delete freshnessDays[freshnessClass];
+  else freshnessDays[freshnessClass] = days;
+  await ctx.db.patch("households", household, {
+    freshnessDays: Object.keys(freshnessDays).length > 0 ? freshnessDays : undefined,
+  });
+  return null;
+}
 
 export const MIN_PORTIONS = 1;
 export const MAX_PORTIONS = 20;
