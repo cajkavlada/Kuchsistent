@@ -7,7 +7,18 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { addDays, today as pragueToday, type CalendarDay } from "@convex/lib/dates";
 import { compareSlots, laterSlots, type MainSlot } from "@convex/lib/slots";
-import { CATEGORY_LABEL, errorMessage } from "~/lib/format";
+import { errorMessage } from "~/lib/format";
+import {
+  NO_FILTERS,
+  PICKER_SHELVES,
+  isSearching,
+  nearBadge,
+  query,
+  resultsLabel,
+  shelves,
+  type Filters,
+  type ShelfKey,
+} from "~/lib/library";
 import {
   MAX_PORTIONS,
   MIN_PORTIONS,
@@ -18,12 +29,20 @@ import {
   dayLabel,
   dayOfMonth,
   porce,
-  searchKey,
   slotShort,
   stripDays,
   weekdayShort,
   type Slot,
 } from "~/lib/plan";
+import {
+  FilterBar,
+  IngredientSheet,
+  NoResults,
+  RecipeSheet,
+  Shelves,
+  TileGrid,
+  type LibraryItem,
+} from "../recipes/library";
 import { Sheet } from "../recipes/ui";
 
 type Plan = FunctionReturnType<typeof api.plan.range>;
@@ -493,14 +512,13 @@ function Stepper({
 
 // ---------- sheets ----------
 
-type Filter = "main" | "special" | "all";
-const FILTERS: [Filter, string][] = [
-  ["main", "Hlavní jídla"],
-  ["special", "Speciality"],
-  ["all", "Vše"],
-];
-
-/** "Přidat jídlo": pick a day, a slot (and an Occasion) and a confirmed Recipe; tap places it. */
+/**
+ * "Přidat jídlo" (#26, decision #12): pick a day, a slot (and an Occasion),
+ * then a Recipe from the library's shelves. The category chip follows the
+ * slot until changed. A tile shows an amber badge when the same Recipe is
+ * planned or was cooked within four days of the day; nothing is blocked.
+ * Tapping a tile opens its detail sheet with "Dát na …".
+ */
 function PickerSheet({
   initialDate,
   initialSlot,
@@ -520,12 +538,16 @@ function PickerSheet({
   const [slot, setSlot] = useState<Slot>(initialSlot);
   const [occasion, setOccasion] = useState("");
   /** Unset: follows the slot (Speciál → Speciality, else Hlavní jídla). */
-  const [filter, setFilter] = useState<Filter | null>(null);
-  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState<Filters["category"] | null>(null);
+  const [rest, setRest] = useState<Omit<Filters, "category">>({ text: "", ingredients: [] });
+  const [shelf, setShelf] = useState<ShelfKey | null>(null);
+  const [ingSheet, setIngSheet] = useState(false);
+  const [open, setOpen] = useState<Id<"recipes"> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const today = pragueToday();
 
-  const recipes = library?.recipes ?? [];
+  const recipes = useMemo(() => library?.recipes ?? [], [library]);
   const chosen = recipeId ? recipes.find((r) => r._id === recipeId) : undefined;
   // "Naplánovat" on a special Recipe starts on Speciál.
   const chosenSpecial = chosen?.category === "special";
@@ -533,14 +555,22 @@ function PickerSheet({
     if (chosenSpecial) setSlot("special");
   }, [chosenSpecial]);
 
-  const shown = filter ?? (slot === "special" ? "special" : "main");
-  const q = searchKey(search);
-  const list = recipes.filter(
-    (r) =>
-      r._id !== chosen?._id &&
-      (shown === "all" || r.category === shown) &&
-      searchKey(r.name).includes(q),
+  const slotCategory = slot === "special" ? "special" : "main";
+  const filters: Filters = useMemo(
+    () => ({ ...rest, category: category ?? slotCategory }),
+    [rest, category, slotCategory],
   );
+  const rows = useMemo(() => query(recipes, filters, today), [recipes, filters, today]);
+  const searching = isSearching(filters);
+  const badgeFor = (r: LibraryItem) => nearBadge(r.mealDates, date, today);
+  const onFilters = (patch: Partial<Filters>) => {
+    const { category: c, ...others } = patch;
+    if (c !== undefined) setCategory(c);
+    setRest((f) => ({ ...f, ...others }));
+    setShelf(null);
+  };
+  const resetFilters = () => onFilters({ ...NO_FILTERS, category: slotCategory });
+  const target = `${dayLabel(date)} · ${SLOT_LABEL[slot]}`;
 
   async function place(id: Id<"recipes">) {
     setBusy(true);
@@ -554,70 +584,153 @@ function PickerSheet({
     }
   }
 
-  const row = (r: (typeof recipes)[number], mark?: boolean) => (
-    <button key={r._id} className={`pick${mark ? " chosen" : ""}`} disabled={busy} onClick={() => place(r._id)}>
-      <b>{r.name}</b>
-      <span className="muted small">{mark ? "Naplánovat sem" : CATEGORY_LABEL[r.category]}</span>
-    </button>
+  let body: React.ReactNode;
+  if (library === undefined) {
+    body = <p className="muted">Načítám…</p>;
+  } else if (recipes.length === 0) {
+    body = (
+      <p className="muted">
+        Zatím nemáš žádné uložené recepty. <Link to="/recepty/vyfotit">Vyfoť první</Link>.
+      </p>
+    );
+  } else if (searching) {
+    body = (
+      <>
+        <div className="count">
+          <span>{resultsLabel(rows.length)}</span>
+        </div>
+        {rows.length ? (
+          <TileGrid rows={rows} onOpen={setOpen} badgeFor={badgeFor} />
+        ) : (
+          <NoResults onReset={resetFilters} />
+        )}
+      </>
+    );
+  } else {
+    const list = shelves(rows, PICKER_SHELVES);
+    const one = shelf && list.find((s) => s.key === shelf);
+    if (one) {
+      body = (
+        <>
+          <div className="count">
+            <b>{one.title}</b>
+            <button type="button" className="chip" onClick={() => setShelf(null)}>
+              ‹ Zpět
+            </button>
+          </div>
+          <TileGrid rows={one.rows} onOpen={setOpen} badgeFor={badgeFor} />
+        </>
+      );
+    } else if (list.length === 0) {
+      body = <NoResults onReset={resetFilters} />;
+    } else {
+      body = <Shelves list={list} onShelf={setShelf} onOpen={setOpen} badgeFor={badgeFor} />;
+    }
+  }
+
+  const occasionField = slot === "special" && (
+    <input
+      className="finput"
+      placeholder="Příležitost, např. Ondra – narozeniny"
+      value={occasion}
+      maxLength={80}
+      onChange={(e) => setOccasion(e.target.value)}
+      aria-label="Příležitost"
+    />
   );
+  const chosenBadge = chosen ? badgeFor(chosen) : null;
+  const openRecipe = open ? recipes.find((r) => r._id === open) : undefined;
+  const openBadge = openRecipe ? badgeFor(openRecipe) : null;
 
   return (
-    <Sheet title="Přidat jídlo" onClose={onClose}>
-      <div className="pday">
-        <button className="navb" aria-label="Předchozí den" onClick={() => setDate(addDays(date, -1))}>
-          ‹
-        </button>
-        <span>{dayLabel(date)}</span>
-        <button className="navb" aria-label="Další den" onClick={() => setDate(addDays(date, 1))}>
-          ›
-        </button>
-      </div>
-      <div className="seg" role="tablist" aria-label="Kam">
-        {PICKER_SLOTS.map((s) => (
-          <button key={s} role="tab" aria-selected={slot === s} className={slot === s ? "on" : ""} onClick={() => setSlot(s)}>
-            {SLOT_LABEL[s]}
+    <>
+      <Sheet title="Přidat jídlo" onClose={onClose}>
+        <div className="pday">
+          <button className="navb" aria-label="Předchozí den" onClick={() => setDate(addDays(date, -1))}>
+            ‹
           </button>
-        ))}
-      </div>
-      {slot === "special" && (
-        <input
-          className="finput"
-          placeholder="Příležitost, např. Ondra – narozeniny"
-          value={occasion}
-          maxLength={80}
-          onChange={(e) => setOccasion(e.target.value)}
-          aria-label="Příležitost"
+          <span>{dayLabel(date)}</span>
+          <button className="navb" aria-label="Další den" onClick={() => setDate(addDays(date, 1))}>
+            ›
+          </button>
+        </div>
+        <div className="seg" role="tablist" aria-label="Kam">
+          {PICKER_SLOTS.map((s) => (
+            <button
+              key={s}
+              role="tab"
+              aria-selected={slot === s}
+              className={slot === s ? "on" : ""}
+              onClick={() => setSlot(s)}
+            >
+              {SLOT_LABEL[s]}
+            </button>
+          ))}
+        </div>
+        {occasionField}
+        {chosen && (
+          <button className="pick chosen" disabled={busy} onClick={() => place(chosen._id)}>
+            <b>{chosen.name}</b>
+            <span className="muted small">
+              Naplánovat sem
+              {chosenBadge && (
+                <>
+                  {" "}
+                  · <span className="near">{chosenBadge}</span>
+                </>
+              )}
+            </span>
+          </button>
+        )}
+        {error && !open && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        {recipes.length > 0 && (
+          <FilterBar
+            filters={filters}
+            onChange={onFilters}
+            onIngredients={() => setIngSheet(true)}
+            reset={{ ...NO_FILTERS, category: slotCategory }}
+          />
+        )}
+        {body}
+      </Sheet>
+
+      {ingSheet && (
+        <IngredientSheet
+          recipes={recipes}
+          picked={filters.ingredients}
+          countFor={(ingredients) => query(recipes, { ...filters, ingredients }, today).length}
+          onChange={(ingredients) => onFilters({ ingredients })}
+          onClose={() => setIngSheet(false)}
         />
       )}
-      {chosen && row(chosen, true)}
-      <input
-        className="finput"
-        type="search"
-        placeholder="Hledat recept…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        aria-label="Hledat recept"
-      />
-      <div className="seg" role="tablist" aria-label="Kategorie">
-        {FILTERS.map(([f, label]) => (
-          <button key={f} role="tab" aria-selected={shown === f} className={shown === f ? "on" : ""} onClick={() => setFilter(f)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      {library === undefined ? (
-        <p className="muted">Načítám…</p>
-      ) : recipes.length === 0 ? (
-        <p className="muted">
-          Zatím nemáš žádné uložené recepty. <Link to="/recepty/vyfotit">Vyfoť první</Link>.
-        </p>
-      ) : list.length === 0 ? (
-        !chosen && <p className="muted">Nic nenalezeno.</p>
-      ) : (
-        <div className="picklist">{list.map((r) => row(r))}</div>
+      {open && (
+        <RecipeSheet
+          recipeId={open}
+          onClose={() => {
+            setOpen(null);
+            setError(null);
+          }}
+          planAction={
+            <>
+              {occasionField}
+              {openBadge && <p className="banner warn small">Pozor: {openBadge}</p>}
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void place(open)}>
+                Dát na {target}
+              </button>
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+            </>
+          }
+        />
       )}
-    </Sheet>
+    </>
   );
 }
 
