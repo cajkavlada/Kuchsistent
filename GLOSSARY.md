@@ -21,6 +21,14 @@ _Avoid_: Deleted recipe
 **Recipe Category**:
 Whether a Recipe is a main (lunch/dinner) or a special; it filters the picker but doesn't restrict where the Recipe can be planned.
 
+**Favourite Recipe**:
+A Recipe either Member has starred; the mark is shared by the whole Household and puts the Recipe on the "Oblíbené" shelf.
+_Avoid_: Bookmark, saved recipe
+
+**Cooking History**:
+When and how often a Recipe was cooked, derived from its past Planned Meals (Leftover Portions don't count); never stored separately.
+_Avoid_: Log, last cooked field
+
 **Recipe Photo**:
 The original picture of a cookbook page that a Recipe was extracted from; kept with the Recipe.
 _Avoid_: Scan, image
