@@ -7,7 +7,8 @@
     "dev:convex": "convex dev",
     "build": "vite build",
     "typecheck": "tsc --noEmit && tsc --noEmit -p convex",
-    "test": "vitest run"
+    "test": "vitest run",
+    "codegen": "node scripts/codegen-offline.mjs"
   },
   "dependencies": {
     "@convex-dev/auth": "^2.0.0",
