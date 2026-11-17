@@ -224,7 +224,13 @@ function Capture() {
           <button className="btn ghost" onClick={() => gallery.current?.click()} disabled={busy || room <= 0}>
             🖼 Z galerie
           </button>
-          {room <= 0 && <p className="muted small nomargin">Víc stránek recept mít nemůže.</p>}
+          {room <= 0 ? (
+            <p className="muted small nomargin">Víc stránek recept mít nemůže.</p>
+          ) : (
+            <p className="muted small nomargin">
+              Tip: vyfoť i obrázek hotového jídla. Poznám ho a dám ho receptu jako náhled.
+            </p>
+          )}
         </>
       ) : (
         <>

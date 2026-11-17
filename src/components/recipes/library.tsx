@@ -302,7 +302,8 @@ export function RecipeInfo({
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const h = history(recipe.mealDates, today());
-  const photo = recipe.photos[0]?.url ?? null;
+  // The Cover Photo (#58) if there is one, else the first page.
+  const photo = (recipe.photos.find((p) => p.cover) ?? recipe.photos[0])?.url ?? null;
 
   async function toggleFavourite() {
     setError(null);
@@ -382,7 +383,13 @@ export function RecipeInfo({
         </div>
       )}
 
-      {viewer && <PhotoViewer photos={recipe.photos} onClose={() => setViewer(false)} />}
+      {viewer && (
+        <PhotoViewer
+          photos={recipe.photos}
+          editable={!planAction && !recipe.archived}
+          onClose={() => setViewer(false)}
+        />
+      )}
       {archiving && (
         <ArchiveSheet
           recipeId={recipe._id}

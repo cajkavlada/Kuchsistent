@@ -11,6 +11,7 @@ import { extractionModels, extractionVendor } from "./lib/config";
 import {
   ExtractionSchema,
   SYSTEM_PROMPT,
+  coverIndexes,
   draftsFromExtraction,
   extractWithFallback,
   type ExtractionImage,
@@ -239,6 +240,7 @@ export const run = internalAction({
         model: outcome.model,
         draft,
         others,
+        covers: coverIndexes(outcome.result, images.length),
       });
       if (applied === null) return null;
       drafts = applied.written.map((w) => w.recipeId);

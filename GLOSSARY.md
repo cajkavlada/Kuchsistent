@@ -33,6 +33,10 @@ _Avoid_: Log, last cooked field
 The original picture of a cookbook page that a Recipe was extracted from; kept with the Recipe.
 _Avoid_: Scan, image
 
+**Cover Photo**:
+A Recipe Photo of the finished food (not a page of text), taken along with the pages. The AI recognises it while reading; it is the Recipe's thumbnail and is not read as a page. At most one per Recipe when set by hand.
+_Avoid_: Dish photo, meal photo, thumbnail image
+
 **Ingredient Line**:
 One line of a Recipe's ingredient list: an ingredient, an amount and a unit, as written in the book.
 _Avoid_: Item
