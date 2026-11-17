@@ -6,6 +6,8 @@ import type { Id } from "@convex/_generated/dataModel";
 import { MAX_PHOTOS } from "@convex/lib/checks";
 import { NeedsInternet } from "~/components/recipes/screens";
 import { ScanView, TopBar } from "~/components/recipes/ui";
+import { CameraView } from "~/components/recipes/CameraView";
+import { wantsInAppCamera } from "~/lib/camera";
 import { errorMessage } from "~/lib/format";
 import { resizeToJpeg, uploadJpeg } from "~/lib/photo";
 import { movePage, removePage } from "~/lib/pages";
@@ -50,6 +52,8 @@ function Capture() {
   const [shown, setShown] = useState(0);
   const [phase, setPhase] = useState<"pick" | "preparing" | "uploading">("pick");
   const [error, setError] = useState<string | null>(null);
+  /** The app's own camera view is open (devices where `capture` opens the file picker). */
+  const [inAppCamera, setInAppCamera] = useState(false);
 
   // Object URLs are freed when they leave the list and when the screen closes.
   const urls = useRef(new Set<string>());
@@ -66,13 +70,18 @@ function Capture() {
 
   function openCamera(replace: boolean) {
     replacing.current = replace;
-    camera.current?.click();
+    if (wantsInAppCamera()) setInAppCamera(true);
+    else camera.current?.click();
   }
 
-  async function onPicked(e: React.ChangeEvent<HTMLInputElement>) {
+  function onPicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // the same file can be picked again
-    if (!file) return;
+    if (file) void addPhoto(file);
+  }
+
+  /** Adds the taken photo as a page, or replaces the shown one ("Vyfotit znovu"). */
+  async function addPhoto(file: Blob) {
     setError(null);
     setPhase("preparing");
     try {
@@ -181,6 +190,19 @@ function Capture() {
         onChange={onPicked}
       />
       <input ref={gallery} type="file" accept="image/*" multiple hidden onChange={onGallery} />
+      {inAppCamera && (
+        <CameraView
+          onShot={(jpeg) => {
+            setInAppCamera(false);
+            void addPhoto(jpeg);
+          }}
+          onClose={() => setInAppCamera(false)}
+          onPickFile={() => {
+            setInAppCamera(false);
+            camera.current?.click();
+          }}
+        />
+      )}
       {!online && <NeedsInternet />}
       {target && (
         <p className="muted small nomargin">
