@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { toCalendarDay, today } from "@convex/lib/dates";
@@ -18,7 +18,9 @@ import {
   type Shelf,
   type ShelfKey,
 } from "~/lib/library";
+import { resizeToJpeg, uploadJpeg } from "~/lib/photo";
 import { dayLabel } from "~/lib/plan";
+import { useOnline } from "~/pwa";
 import { lineIngredientName } from "./Ingredients";
 import { amountUnit, type RecipeView } from "./Review";
 import { PhotoViewer, Sheet } from "./ui";
@@ -283,6 +285,56 @@ function fullDate(instant: number): string {
 }
 
 /**
+ * "🍽 Přidat / Změnit fotku jídla" (#60): picks a photo (camera or gallery,
+ * the phone asks), resizes and uploads it as the Recipe's Cover Photo.
+ */
+function CoverPhotoButton({ recipe, onError }: { recipe: RecipeView; onError: (e: string | null) => void }) {
+  const generateUploadUrl = useMutation(api.recipes.generateUploadUrl);
+  const addCoverPhoto = useMutation(api.recipes.addCoverPhoto);
+  const online = useOnline();
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const hasCover = recipe.photos.some((p) => p.cover);
+
+  async function onPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    onError(null);
+    setBusy(true);
+    try {
+      const jpeg = await resizeToJpeg(file);
+      const storageId = await uploadJpeg(await generateUploadUrl(), jpeg);
+      await addCoverPhoto({ recipeId: recipe._id, storageId: storageId as Id<"_storage"> });
+    } catch (err) {
+      onError(errorMessage(err, "Fotku se nepodařilo nahrát. Zkontroluj připojení a zkus to znovu."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <input ref={input} type="file" accept="image/*" hidden onChange={onPicked} />
+      <button
+        type="button"
+        className="star"
+        disabled={busy || !online}
+        onClick={() => input.current?.click()}
+      >
+        {busy
+          ? "Nahrávám fotku…"
+          : !online
+            ? "🍽 Fotka jídla (bez připojení)"
+            : hasCover
+              ? "🍽 Změnit fotku jídla"
+              : "🍽 Přidat fotku jídla"}
+      </button>
+    </>
+  );
+}
+
+/**
  * A confirmed Recipe's header, history, actions and Ingredients: the body of
  * the library's detail sheet and the top of the Recipe screen. With
  * `planAction` (the picker, #26) that replaces "Naplánovat", and editing and
@@ -337,6 +389,9 @@ export function RecipeInfo({
           >
             {recipe.favourite ? "★ Oblíbený" : "☆ Přidat k oblíbeným"}
           </button>
+          {!planAction && !recipe.archived && (
+            <CoverPhotoButton recipe={recipe} onError={setError} />
+          )}
         </div>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
