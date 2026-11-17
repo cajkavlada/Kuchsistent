@@ -4,6 +4,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { daysLabel, freshnessLabel, sectionLabel } from "@convex/lib/ingredients";
 import { Sheet } from "~/components/recipes/ui";
+import { useOfflineShell } from "~/offline";
 import { dayLabel, SLOT_LABEL } from "~/lib/plan";
 import { rohlikSearchUrl } from "~/lib/rohlik";
 import {
@@ -24,14 +25,18 @@ import {
  */
 export function ItemSheet({
   itemId,
+  locked = false,
   onClose,
   onPlenty,
 }: {
   itemId: Id<"shoppingItems">;
+  /** Offline (#13): details may not load, and changes are off. */
+  locked?: boolean;
   onClose: () => void;
   onPlenty: (ingredientId: Id<"ingredients">, plenty: boolean) => void;
 }) {
-  const item = useQuery(api.shopping.item, { itemId });
+  const shell = useOfflineShell();
+  const item = useQuery(api.shopping.item, shell ? "skip" : { itemId });
   const removeItem = useMutation(api.shopping.removeItem);
   const moveItem = useMutation(api.shopping.moveItem);
   const [moving, setMoving] = useState(false);
@@ -40,7 +45,9 @@ export function ItemSheet({
   if (item === undefined) {
     return (
       <Sheet title="Položka" onClose={onClose}>
-        <p className="muted">Načítám…</p>
+        <p className="muted">
+          {locked ? "Bez připojení – podrobnosti se načtou, jakmile bude signál." : "Načítám…"}
+        </p>
       </Sheet>
     );
   }
@@ -138,59 +145,62 @@ export function ItemSheet({
         </div>
       )}
 
-      {item.targets.length > 1 && (
-        <div>
-          <h3 className="isheet-sub">Nakoupit při nákupu</h3>
-          <div className="chips">
-            {item.targets.map((t) => (
-              <button
-                key={t._id}
-                className={`chip${t.current ? " on" : ""}`}
-                aria-pressed={t.current}
-                disabled={moving || t.block !== null}
-                onClick={() => !t.current && void move(t._id)}
-              >
-                {dayLabel(t.date)} {t.kind === "rohlik" ? "🚚" : "🛒"}
-                {t.block && ` · ${MOVE_BLOCK_LABEL[t.block]}`}
-              </button>
-            ))}
+      <fieldset className="offline-lock" disabled={locked}>
+        {locked && <p className="offline-note">Bez připojení – změny půjdou udělat, až bude signál.</p>}
+        {item.targets.length > 1 && (
+          <div>
+            <h3 className="isheet-sub">Nakoupit při nákupu</h3>
+            <div className="chips">
+              {item.targets.map((t) => (
+                <button
+                  key={t._id}
+                  className={`chip${t.current ? " on" : ""}`}
+                  aria-pressed={t.current}
+                  disabled={moving || t.block !== null}
+                  onClick={() => !t.current && void move(t._id)}
+                >
+                  {dayLabel(t.date)} {t.kind === "rohlik" ? "🚚" : "🛒"}
+                  {t.block && ` · ${MOVE_BLOCK_LABEL[t.block]}`}
+                </button>
+              ))}
+            </div>
+            {!item.manual && (
+              <p className="muted small">
+                {item.pinned
+                  ? "Přesunuto ručně: zůstane tady i po změnách v plánu, dokud tenhle nákup stihne jídlo."
+                  : "Přesunutá položka zůstane na vybraném nákupu i po změnách v plánu."}
+              </p>
+            )}
           </div>
-          {!item.manual && (
-            <p className="muted small">
-              {item.pinned
-                ? "Přesunuto ručně: zůstane tady i po změnách v plánu, dokud tenhle nákup stihne jídlo."
-                : "Přesunutá položka zůstane na vybraném nákupu i po změnách v plánu."}
-            </p>
-          )}
-        </div>
-      )}
+        )}
 
-      {item.trip.kind === "rohlik" && (
-        <a className="btn rl" href={rohlikSearchUrl(item.label)} target="_blank" rel="noopener noreferrer">
-          🔎 Hledat na Rohlíku
-        </a>
-      )}
+        {item.trip.kind === "rohlik" && !locked && (
+          <a className="btn rl" href={rohlikSearchUrl(item.label)} target="_blank" rel="noopener noreferrer">
+            🔎 Hledat na Rohlíku
+          </a>
+        )}
 
-      {ing && (
-        <label className="check plenty-toggle">
-          <input
-            type="checkbox"
-            checked={ing.plenty}
-            onChange={(e) => onPlenty(ing._id, e.target.checked)}
-          />
-          <span>
-            🏠 Máme dost doma
-            <br />
-            <small className="muted">platí pro „{ing.name}" ve všech nákupech</small>
-          </span>
-        </label>
-      )}
+        {ing && (
+          <label className="check plenty-toggle">
+            <input
+              type="checkbox"
+              checked={ing.plenty}
+              onChange={(e) => onPlenty(ing._id, e.target.checked)}
+            />
+            <span>
+              🏠 Máme dost doma
+              <br />
+              <small className="muted">platí pro „{ing.name}" ve všech nákupech</small>
+            </span>
+          </label>
+        )}
 
-      {(item.notNeeded || item.manual) && (
-        <button className="btn danger" onClick={remove}>
-          Smazat
-        </button>
-      )}
+        {(item.notNeeded || item.manual) && (
+          <button className="btn danger" onClick={remove}>
+            Smazat
+          </button>
+        )}
+      </fieldset>
       {error && <p className="error">{error}</p>}
     </Sheet>
   );

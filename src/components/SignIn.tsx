@@ -5,6 +5,7 @@ import {
 } from "@convex-dev/auth/methods/google/react";
 import { api } from "@convex/_generated/api";
 import { TestLogin } from "./TestLogin";
+import { usePendingTicks } from "~/offline";
 
 const FLOW_ERRORS: Record<string, string> = {
   ACCESS_DENIED: "Přihlášení bylo zrušeno.",
@@ -17,6 +18,8 @@ export function SignIn({ invited = false }: { invited?: boolean }) {
   const { signIn } = useSignInWithGoogle(api.auth);
   const { flowError } = useOauth();
   const [busy, setBusy] = useState(false);
+  // Ticks made offline wait here when the session expired (#13).
+  const pending = Object.keys(usePendingTicks()).length;
   const [error, setError] = useState<string | null>(null);
   if (flowError) console.error("Google sign-in failed", flowError);
   const message = error ?? (flowError ? FLOW_ERRORS[flowError.error] : null);
@@ -39,6 +42,9 @@ export function SignIn({ invited = false }: { invited?: boolean }) {
     <main className="center">
       <p className="logo">🍲 Kuchsistent</p>
       <p className="muted">Recepty, plán jídel a nákupní seznam pro celou domácnost.</p>
+      {pending > 0 && (
+        <p className="offline-note">Odškrtnutí z nákupu ({pending}) se uloží, jakmile se přihlásíš.</p>
+      )}
       {invited && (
         <p>Máš pozvánku do domácnosti. Přihlas se a hned tě připojíme.</p>
       )}

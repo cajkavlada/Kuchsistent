@@ -460,6 +460,23 @@ describe("setChecked", () => {
     await expect(t.run((ctx) => setCheckedFor(ctx, m, { itemId: item._id, checked: false }))).resolves.toBeNull();
   });
 
+  test("a late tick (#13) applies to the item after regeneration moved it to another trip", async () => {
+    const t = convexTest(schema, modules);
+    const m = await newMember(t);
+    const beef = await ingredient(t, m, "hovězí");
+    await meal(t, m, await recipe(t, m, [{ ingredient: beef, amount: 500, unit: "g" }]), "2026-11-19");
+    await regen(t, m);
+    const [before] = await allItems(t);
+    const trip = await t.run((ctx) => ctx.db.get("shoppingTrips", before.trip));
+    // Meanwhile the other phone moves that trip past the meal: the item flows to an earlier trip.
+    await t.run((ctx) => moveTripFor(ctx, m, { tripId: trip!._id, date: "2026-11-21" }, TODAY));
+    const [after] = await allItems(t);
+    expect(after._id).toBe(before._id);
+    expect(after.trip).not.toBe(before.trip);
+    await t.run((ctx) => setCheckedFor(ctx, m, { itemId: before._id, checked: true }));
+    expect((await allItems(t))[0].checked).toBe(true);
+  });
+
   test("requires sign-in", async () => {
     const t = convexTest(schema, modules);
     await expect(t.query(api.shopping.list, {})).rejects.toThrow(/UNAUTHENTICATED/);

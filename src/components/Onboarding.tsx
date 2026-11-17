@@ -5,6 +5,7 @@ import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
 import { normalizeInviteCode } from "@convex/lib/inviteCode";
 import { inviteErrorMessage } from "~/lib/invite";
+import { clearOfflineData } from "~/offline";
 
 type Step = "choose" | "create" | "invite";
 
@@ -34,7 +35,15 @@ export function Onboarding({ mayCreate }: { mayCreate: boolean }) {
           <NoInvite onBack={() => setStep("choose")} />
         ))}
       {step === "invite" && <RedeemCode onBack={() => setStep("choose")} />}
-      <button className="link" onClick={() => void signOut()}>Odhlásit se</button>
+      <button
+        className="link"
+        onClick={() => {
+          clearOfflineData();
+          void signOut();
+        }}
+      >
+        Odhlásit se
+      </button>
     </main>
   );
 }

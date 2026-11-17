@@ -322,6 +322,7 @@ export async function regenerateShopping(
     });
   }
 
+  const orphans: Doc<"shoppingItems">[] = [];
   for (const item of items) {
     if (item.manual || item.checked) continue;
     const hold = heldFields.get(item._id);
@@ -332,13 +333,25 @@ export async function regenerateShopping(
     const key = itemKey(item.trip, item.ingredient, item.topUp);
     const want = desired.get(key);
     if (!want) {
-      await ctx.db.delete("shoppingItems", item._id);
+      orphans.push(item);
       continue;
     }
     desired.delete(key);
     const fields = itemFields(want);
     if (!sameFields(item, fields)) await ctx.db.patch("shoppingItems", item._id, fields);
   }
+  // An item that only changes trip keeps its id, so a tick sent late (offline,
+  // #13) still applies to it wherever it is now.
+  for (const [key, want] of desired) {
+    const at = orphans.findIndex(
+      (o) => o.ingredient === want.ingredient && (o.topUp ?? false) === want.topUp,
+    );
+    if (at < 0) continue;
+    const [item] = orphans.splice(at, 1);
+    desired.delete(key);
+    await ctx.db.patch("shoppingItems", item._id, { trip: want.trip, pinned: false, ...itemFields(want) });
+  }
+  for (const item of orphans) await ctx.db.delete("shoppingItems", item._id);
   for (const want of desired.values()) {
     await ctx.db.insert("shoppingItems", {
       household,
