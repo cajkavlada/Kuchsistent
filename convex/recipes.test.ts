@@ -22,6 +22,7 @@ import {
   discardFor,
   retryExtractionFor,
   setCoverPhotoFor,
+  addCoverPhotoFor,
   libraryFor,
   updateBasicsFor,
   updateLineFor,
@@ -965,5 +966,55 @@ describe("Cover Photo (#58)", () => {
       covers: [1],
     });
     expect(await coversOf(t, applied!.written[1].recipeId)).toEqual([false, true]);
+  });
+});
+
+describe("adding a Cover Photo later (#60)", () => {
+  const photosOfRecipe = (t: T, recipeId: Id<"recipes">) =>
+    t.run((ctx) =>
+      ctx.db
+        .query("recipePhotos")
+        .withIndex("by_recipe", (q) => q.eq("recipe", recipeId))
+        .collect(),
+    );
+
+  test("a saved recipe gets a cover without being read again; a new one replaces it", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId, photo: page } = await readDraft(t, member);
+    await t.run((ctx) => ctx.db.patch("recipes", recipeId, { status: "confirmed" }));
+    const before = await t.run((ctx) => ctx.db.get("recipes", recipeId));
+
+    const food = await storePhoto(t);
+    await t.run((ctx) => addCoverPhotoFor(ctx, member, { recipeId, storageId: food }));
+    let photos = await photosOfRecipe(t, recipeId);
+    expect(photos.map((p) => [p.storageId, p.cover ?? false])).toEqual([[page, false], [food, true]]);
+    const after = await t.run((ctx) => ctx.db.get("recipes", recipeId));
+    expect(after!.extraction).toEqual(before!.extraction);
+    expect(await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(1);
+
+    const better = await storePhoto(t);
+    await t.run((ctx) => addCoverPhotoFor(ctx, member, { recipeId, storageId: better }));
+    photos = await photosOfRecipe(t, recipeId);
+    expect(photos.map((p) => [p.storageId, p.cover ?? false])).toEqual([[page, false], [better, true]]);
+    expect(await t.run((ctx) => ctx.db.system.get("_storage", food))).toBeNull();
+  });
+
+  test("rejects photos already in use, other households and archived recipes", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId, photo } = await readDraft(t, member);
+    await expect(
+      t.run((ctx) => addCoverPhotoFor(ctx, member, { recipeId, storageId: photo })),
+    ).rejects.toThrow(/INVALID_PHOTOS/);
+    const stranger = await newMember(t, "b@example.com");
+    const food = await storePhoto(t);
+    await expect(
+      t.run((ctx) => addCoverPhotoFor(ctx, stranger, { recipeId, storageId: food })),
+    ).rejects.toThrow();
+    await t.run((ctx) => ctx.db.patch("recipes", recipeId, { archived: true }));
+    await expect(
+      t.run((ctx) => addCoverPhotoFor(ctx, member, { recipeId, storageId: food })),
+    ).rejects.toThrow(/NOT_FOUND/);
   });
 });

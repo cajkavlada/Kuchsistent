@@ -245,14 +245,17 @@ async function replaceLines(
  * same spread still shows it.
  */
 async function deletePhotos(ctx: MutationCtx, recipeId: Id<"recipes">) {
-  for (const photo of await photosOf(ctx, recipeId)) {
-    await ctx.db.delete("recipePhotos", photo._id);
-    const other = await ctx.db
-      .query("recipePhotos")
-      .withIndex("by_storage", (q) => q.eq("storageId", photo.storageId))
-      .first();
-    if (other === null) await ctx.storage.delete(photo.storageId);
-  }
+  for (const photo of await photosOf(ctx, recipeId)) await deletePhoto(ctx, photo);
+}
+
+/** One photo row, and its file unless another row still shows it. */
+async function deletePhoto(ctx: MutationCtx, photo: Doc<"recipePhotos">) {
+  await ctx.db.delete("recipePhotos", photo._id);
+  const other = await ctx.db
+    .query("recipePhotos")
+    .withIndex("by_storage", (q) => q.eq("storageId", photo.storageId))
+    .first();
+  if (other === null) await ctx.storage.delete(photo.storageId);
 }
 
 async function scheduleExtraction(ctx: MutationCtx, recipeId: Id<"recipes">) {
@@ -885,6 +888,31 @@ export const setCoverPhoto = mutation({
   returns: v.null(),
   handler: async (ctx, args) => setCoverPhotoFor(ctx, await requireMember(ctx), args),
 });
+
+/**
+ * "🍽 Přidat / Změnit fotku jídla" (#60): an uploaded photo becomes the
+ * Recipe's Cover Photo, replacing any earlier one. The recipe isn't re-read.
+ */
+export const addCoverPhoto = mutation({
+  args: { recipeId: v.id("recipes"), storageId: v.id("_storage") },
+  returns: v.null(),
+  handler: async (ctx, args) => addCoverPhotoFor(ctx, await requireMember(ctx), args),
+});
+
+export async function addCoverPhotoFor(
+  ctx: MutationCtx,
+  member: Member,
+  { recipeId, storageId }: { recipeId: Id<"recipes">; storageId: Id<"_storage"> },
+): Promise<null> {
+  await loadEditable(ctx, member, recipeId);
+  const photos = await photosOf(ctx, recipeId);
+  const covers = photos.filter((p) => p.cover);
+  await checkNewPhotos(ctx, [storageId], photos.length - covers.length);
+  for (const old of covers) await deletePhoto(ctx, old);
+  const order = photos.length ? photos[photos.length - 1].order + 1 : 0;
+  await ctx.db.insert("recipePhotos", { recipe: recipeId, storageId, order, cover: true });
+  return null;
+}
 
 export async function setCoverPhotoFor(
   ctx: MutationCtx,
