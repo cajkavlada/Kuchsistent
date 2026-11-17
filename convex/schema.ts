@@ -118,11 +118,16 @@ export default defineSchema({
     ),
   }).index("by_household_status", ["household", "status"]),
 
-  /** A Recipe Photo: the resized JPEG of a cookbook page, kept with the Recipe. */
+  /**
+   * A Recipe Photo: the resized JPEG of a cookbook page, kept with the Recipe.
+   * `cover` marks a Cover Photo (#58): the finished food, not a page; the AI
+   * sets it when reading and the user can change it. Unset = a page.
+   */
   recipePhotos: defineTable({
     recipe: v.id("recipes"),
     storageId: v.id("_storage"),
     order: v.number(),
+    cover: v.optional(v.boolean()),
   })
     .index("by_recipe", ["recipe", "order"])
     .index("by_storage", ["storageId"]),

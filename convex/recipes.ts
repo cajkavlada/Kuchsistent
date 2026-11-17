@@ -515,6 +515,8 @@ export const applyExtraction = internalMutation({
     model: v.string(),
     draft: vReadDraft,
     others: v.optional(v.array(vReadDraft)),
+    /** 0-based indexes of the photos that show the finished food (#58). */
+    covers: v.optional(v.array(v.number())),
   },
   returns: v.union(
     v.null(),
@@ -523,10 +525,15 @@ export const applyExtraction = internalMutation({
       written: v.array(v.object({ recipeId: v.id("recipes"), index: v.number() })),
     }),
   ),
-  handler: async (ctx, { recipeId, startedAt, model, draft, others = [] }) => {
+  handler: async (ctx, { recipeId, startedAt, model, draft, others = [], covers = [] }) => {
     const recipe = await ctx.db.get("recipes", recipeId);
     // Discarded meanwhile, or superseded by a retry: drop this result.
     if (!isCurrentRun(recipe, startedAt)) return null;
+    // The photos were sent in this order; a new reading decides covers afresh.
+    for (const [index, photo] of (await photosOf(ctx, recipeId)).entries()) {
+      const cover = covers.includes(index) || undefined;
+      if (cover !== photo.cover) await ctx.db.patch("recipePhotos", photo._id, { cover });
+    }
     const drafts = [draft, ...others].slice(0, MAX_SPREAD);
     const extraction = { state: "pending" as const, stage: "match" as const, model, startedAt };
     const written: { recipeId: Id<"recipes">; index: number }[] = [];
@@ -560,7 +567,12 @@ export const applyExtraction = internalMutation({
             spread: spreadOf(index),
           });
           for (const p of photos) {
-            await ctx.db.insert("recipePhotos", { recipe: sibling, storageId: p.storageId, order: p.order });
+            await ctx.db.insert("recipePhotos", {
+              recipe: sibling,
+              storageId: p.storageId,
+              order: p.order,
+              cover: p.cover,
+            });
           }
           await writeReading(ctx, sibling, drafts[index], extraction);
           written.push({ recipeId: sibling, index });
@@ -671,11 +683,10 @@ export async function chooseFromPhotoFor(
 
 // ---------- reading for the UI ----------
 
-async function firstPhotoUrl(ctx: QueryCtx, recipeId: Id<"recipes">) {
-  const photo = await ctx.db
-    .query("recipePhotos")
-    .withIndex("by_recipe", (q) => q.eq("recipe", recipeId))
-    .first();
+/** The Recipe's thumbnail: its Cover Photo (#58), else the first page. */
+async function thumbnailUrl(ctx: QueryCtx, recipeId: Id<"recipes">) {
+  const photos = await photosOf(ctx, recipeId);
+  const photo = photos.find((p) => p.cover) ?? photos[0];
   return photo ? await ctx.storage.getUrl(photo.storageId) : null;
 }
 
@@ -738,7 +749,7 @@ export async function libraryFor(ctx: QueryCtx, household: Id<"households">) {
     baseServings: r.baseServings,
     extractionState: r.extraction?.state ?? null,
     choosing: r.spread?.choosing ?? false,
-    photoUrl: await firstPhotoUrl(ctx, r._id),
+    photoUrl: await thumbnailUrl(ctx, r._id),
   });
   const names = new Map(
     (await catalogueOf(ctx, household)).map((i) => [i._id, i.name] as const),
@@ -807,6 +818,7 @@ export const get = query({
       (await photosOf(ctx, recipeId)).map(async (p) => ({
         _id: p._id,
         url: await ctx.storage.getUrl(p.storageId),
+        cover: p.cover ?? false,
       })),
     );
     const lines = await lineViewsFor(ctx, member, recipeId);
@@ -863,6 +875,31 @@ export const get = query({
 });
 
 // ---------- review edits ----------
+
+/**
+ * "Použít jako náhled" (#58): makes a photo the Recipe's only Cover Photo, or
+ * (`cover: false`) turns it back into a page. Fixes the AI's guess.
+ */
+export const setCoverPhoto = mutation({
+  args: { photoId: v.id("recipePhotos"), cover: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => setCoverPhotoFor(ctx, await requireMember(ctx), args),
+});
+
+export async function setCoverPhotoFor(
+  ctx: MutationCtx,
+  member: Member,
+  { photoId, cover }: { photoId: Id<"recipePhotos">; cover: boolean },
+): Promise<null> {
+  const photo = await ctx.db.get("recipePhotos", photoId);
+  if (photo === null) throw new ConvexError({ code: "NOT_FOUND" });
+  await loadEditable(ctx, member, photo.recipe);
+  for (const p of await photosOf(ctx, photo.recipe)) {
+    const next = (p._id === photoId ? cover : p.cover && !cover) || undefined;
+    if (next !== p.cover) await ctx.db.patch("recipePhotos", p._id, { cover: next });
+  }
+  return null;
+}
 
 /** Basics sheet: name, category and portions (unset = the book gives none). */
 export const updateBasics = mutation({

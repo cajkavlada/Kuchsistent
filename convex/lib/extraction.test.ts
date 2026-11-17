@@ -1,6 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   USER_PROMPT,
+  ExtractionSchema,
+  coverIndexes,
   draftFromExtraction,
   draftsFromExtraction,
   extractWithFallback,
@@ -198,5 +200,22 @@ describe("draftsFromExtraction (#21)", () => {
       "Kuře na paprice",
     ]);
     expect(draftsFromExtraction({ recipes: [empty, empty] })).toHaveLength(1);
+  });
+});
+
+describe("coverIndexes (#58)", () => {
+  test("1-based photo numbers become 0-based indexes; nonsense is dropped", () => {
+    expect(coverIndexes({ ...ok, coverPhotos: [3, 1, 3, 0, 4, 1.5] }, 3)).toEqual([0, 2]);
+    expect(coverIndexes(ok, 2)).toEqual([]);
+  });
+
+  test("the recipe can't be read from covers only, so not every photo is one", () => {
+    expect(coverIndexes({ ...ok, coverPhotos: [1] }, 1)).toEqual([]);
+    expect(coverIndexes({ ...ok, coverPhotos: [1, 2] }, 2)).toEqual([]);
+  });
+
+  test("the schema accepts readings with and without coverPhotos", () => {
+    expect(ExtractionSchema.safeParse({ ...ok, coverPhotos: [2] }).success).toBe(true);
+    expect(ExtractionSchema.safeParse(ok).success).toBe(true);
   });
 });

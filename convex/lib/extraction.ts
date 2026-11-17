@@ -41,6 +41,10 @@ export const ExtractedRecipeSchema = z.object({
 
 export const ExtractionSchema = z.object({
   recipes: z.array(ExtractedRecipeSchema),
+  coverPhotos: z
+    .array(z.number())
+    .optional()
+    .describe("Pořadová čísla fotek (od 1), na kterých je hotové jídlo, a ne text receptu; jinak []"),
 });
 
 export type Extraction = z.infer<typeof ExtractionSchema>;
@@ -58,7 +62,8 @@ Pravidla:
 6. Starší písmo a vybledlý tisk: když si znakem nejsi jistý, napiš nejlepší čtení a celý řádek (raw) dej do uncertain. Nikdy nehádej potichu.
 7. Pokud je fotka otočená, čti ji ve správné orientaci.
 8. servings vyplň jen tehdy, když kniha počet porcí uvádí; jinak null.
-9. optional dej true u surovin, které recept uvádí jako volitelné („případně“, „na ozdobu“, „podle chuti lze přidat“).`;
+9. optional dej true u surovin, které recept uvádí jako volitelné („případně“, „na ozdobu“, „podle chuti lze přidat“).
+10. Některá fotka může místo textu ukazovat hotové jídlo (třeba vyfocený obrázek z kuchařky nebo uvařené jídlo na talíři). Její pořadové číslo (od 1) dej do coverPhotos a recept z ní nečti. Stránka s textem receptu do coverPhotos nepatří, ani když je na ní i obrázek.`;
 
 export const USER_PROMPT = "Přepiš recept(y) z fotografie podle schématu.";
 
@@ -68,7 +73,20 @@ export const USER_PROMPT = "Přepiš recept(y) z fotografie podle schématu.";
  */
 export function userPrompt(pages: number): string {
   if (pages <= 1) return USER_PROMPT;
-  return `Fotografie (${pages}) jsou po sobě jdoucí stránky jednoho receptu, v tomto pořadí. Spoj je a vrať ho jako jeden recept podle schématu; continuesOffPage vyplň podle poslední stránky.`;
+  return `Fotografie (${pages}) jsou po sobě jdoucí stránky jednoho receptu, v tomto pořadí; některá může ukazovat hotové jídlo (pravidlo 10). Stránky s textem spoj a vrať jako jeden recept podle schématu; continuesOffPage vyplň podle poslední stránky s textem.`;
+}
+
+/**
+ * Cover Photos (#58): 0-based indexes of the photos the model says show the
+ * finished food rather than recipe text. Out-of-range numbers are dropped;
+ * if every photo would be a cover, none is (the recipe was read from them).
+ */
+export function coverIndexes(result: Extraction, photos: number): number[] {
+  const out = new Set<number>();
+  for (const n of result.coverPhotos ?? []) {
+    if (Number.isInteger(n) && n >= 1 && n <= photos) out.add(n - 1);
+  }
+  return out.size < photos ? [...out].sort((a, b) => a - b) : [];
 }
 
 export type ExtractionImage = { data: Uint8Array; mediaType: string };

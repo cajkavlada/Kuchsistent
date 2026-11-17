@@ -21,6 +21,8 @@ import {
   deleteLineFor,
   discardFor,
   retryExtractionFor,
+  setCoverPhotoFor,
+  libraryFor,
   updateBasicsFor,
   updateLineFor,
   updateStepsFor,
@@ -868,5 +870,100 @@ describe("edge flows (#21)", () => {
     });
     expect(applied!.written).toHaveLength(1);
     expect(await t.run((ctx) => ctx.db.query("recipes").collect())).toHaveLength(1);
+  });
+});
+
+describe("Cover Photo (#58)", () => {
+  async function readWithCover(t: T, member: Member) {
+    const [page, food] = [await storePhoto(t), await storePhoto(t)];
+    const recipeId = await t.run((ctx) => createDraftFor(ctx, member, [page, food]));
+    const run = await startedAt(t, recipeId);
+    await t.mutation(internal.recipes.applyExtraction, {
+      recipeId,
+      startedAt: run,
+      model: "m",
+      draft: DRAFT,
+      covers: [1],
+    });
+    await t.mutation(internal.recipes.applyMatching, {
+      recipeId,
+      startedAt: run,
+      lines: DRAFT.lines.map((l) => ({ name: "sůl", raw: l.raw })),
+      items: [],
+      result: null,
+    });
+    return { recipeId, page, food };
+  }
+
+  const coversOf = (t: T, recipeId: Id<"recipes">) =>
+    t.run(async (ctx) =>
+      (
+        await ctx.db
+          .query("recipePhotos")
+          .withIndex("by_recipe", (q) => q.eq("recipe", recipeId))
+          .collect()
+      ).map((p) => p.cover ?? false),
+    );
+
+  test("the photo the AI calls food becomes the cover and the library thumbnail", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId, food } = await readWithCover(t, member);
+    expect(await coversOf(t, recipeId)).toEqual([false, true]);
+    const foodUrl = await t.run((ctx) => ctx.storage.getUrl(food));
+    const lib = await t.run((ctx) => libraryFor(ctx, member.household));
+    expect(lib.drafts[0].photoUrl).toBe(foodUrl);
+  });
+
+  test("a new reading decides covers afresh", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId } = await readWithCover(t, member);
+    const more = await storePhoto(t);
+    await t.run((ctx) => addPagesFor(ctx, member, { recipeId, storageIds: [more] }));
+    await t.mutation(internal.recipes.applyExtraction, {
+      recipeId,
+      startedAt: await startedAt(t, recipeId),
+      model: "m",
+      draft: DRAFT,
+      covers: [2],
+    });
+    expect(await coversOf(t, recipeId)).toEqual([false, false, true]);
+  });
+
+  test("the user can move the cover to another photo or remove it", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const { recipeId } = await readWithCover(t, member);
+    const ids = await t.run(async (ctx) =>
+      (await ctx.db.query("recipePhotos").collect()).map((p) => p._id),
+    );
+    await t.run((ctx) => setCoverPhotoFor(ctx, member, { photoId: ids[0], cover: true }));
+    expect(await coversOf(t, recipeId)).toEqual([true, false]);
+    await t.run((ctx) => setCoverPhotoFor(ctx, member, { photoId: ids[1], cover: false }));
+    expect(await coversOf(t, recipeId)).toEqual([true, false]);
+    await t.run((ctx) => setCoverPhotoFor(ctx, member, { photoId: ids[0], cover: false }));
+    expect(await coversOf(t, recipeId)).toEqual([false, false]);
+
+    const stranger = await newMember(t, "b@example.com");
+    await expect(
+      t.run((ctx) => setCoverPhotoFor(ctx, stranger, { photoId: ids[0], cover: true })),
+    ).rejects.toThrow();
+  });
+
+  test("drafts split from one photo keep its cover", async () => {
+    const t = convexTest(schema, modules);
+    const member = await newMember(t);
+    const [page, food] = [await storePhoto(t), await storePhoto(t)];
+    const recipeId = await t.run((ctx) => createDraftFor(ctx, member, [page, food]));
+    const applied = await t.mutation(internal.recipes.applyExtraction, {
+      recipeId,
+      startedAt: await startedAt(t, recipeId),
+      model: "m",
+      draft: { ...DRAFT, pageSide: "left" },
+      others: [{ name: "Polévka", steps: [], lines: [], pageSide: "right" }],
+      covers: [1],
+    });
+    expect(await coversOf(t, applied!.written[1].recipeId)).toEqual([false, true]);
   });
 });

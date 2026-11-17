@@ -45,7 +45,7 @@ export function ReadingFailed({ recipe }: { recipe: RecipeView }) {
           <code>{recipe.extraction.error}</code>
         </details>
       )}
-      <PhotoPane photos={recipe.photos} />
+      <PhotoPane photos={recipe.photos} editable />
       <FailureActions recipe={recipe} />
     </section>
   );

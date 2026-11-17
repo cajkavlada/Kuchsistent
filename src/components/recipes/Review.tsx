@@ -86,7 +86,7 @@ export function Review({
     return (
       <section className="page">
         <TopBar title={recipe.name || "Kontrola"} />
-        <PhotoPane photos={recipe.photos} />
+        <PhotoPane photos={recipe.photos} editable />
         {fromPhoto}
         <p className="qcount">
           Ke kontrole ještě {queue.length}
@@ -119,7 +119,7 @@ export function Review({
   return (
     <section className="page with-bar">
       <TopBar title={editing ? "Upravit recept" : recipe.name || (recipe.photos.length ? "Shrnutí" : "Nový recept")} />
-      <PhotoPane photos={recipe.photos} />
+      <PhotoPane photos={recipe.photos} editable />
       {queue.length > 0 ? (
         <div className="banner warn frow">
           <span className="grow">Zbývá {queue.length} k ověření.</span>
