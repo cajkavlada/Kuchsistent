@@ -6,6 +6,8 @@ import { api } from "@convex/_generated/api";
 import { invitePath } from "@convex/lib/inviteCode";
 import { APP_TIME_ZONE } from "@convex/lib/dates";
 import { rememberMember } from "~/pwa";
+import { clearOfflineData, pendingTickCount } from "~/offline";
+import { signOutQuestion } from "~/lib/offline";
 import { FreshnessCard } from "~/components/settings/Freshness";
 import { MAX_TRIP_INTERVAL_DAYS, MIN_TRIP_INTERVAL_DAYS } from "@convex/lib/shopping";
 import { everyDays } from "~/lib/shopping";
@@ -26,6 +28,10 @@ function Settings() {
       <button
         className="btn"
         onClick={() => {
+          // Unsent ticks (#13) are lost with the saved copy: ask first.
+          const pending = pendingTickCount();
+          if (pending > 0 && !window.confirm(signOutQuestion(pending))) return;
+          clearOfflineData();
           rememberMember(false);
           void signOut();
         }}

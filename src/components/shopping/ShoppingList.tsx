@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { dayLabel } from "~/lib/plan";
@@ -17,6 +17,17 @@ import {
   splitPlenty,
 } from "~/lib/shopping";
 import { rohlikSearchUrl } from "~/lib/rohlik";
+import { applyTicks, listFromSaved, savedAtLabel, type Ticks } from "~/lib/offline";
+import {
+  lastTrip,
+  queueTick,
+  rememberTrip,
+  useConnection,
+  useLocked,
+  useOfflineShell,
+  usePendingTicks,
+  useSavedList,
+} from "~/offline";
 import { ItemSheet } from "./ItemSheet";
 import { RohlikCard } from "./RohlikCard";
 import { AddTripSheet, TripMenuSheet } from "./TripSheets";
@@ -33,32 +44,27 @@ const FLASH_MS = 1600;
  * Shopping Trip grouped by Store Section, with Plenty items in a "Máme dost"
  * box at the bottom (#29). The trip's "⋯" menu switches, moves, deletes and
  * closes it; the field on top adds Manual Shopping Items (#30). Ticks are
- * optimistic and live for both Members. Tapping the circle ticks; tapping
- * the name opens the item sheet. A Rohlík trip gets the hand-off card and a
- * "🔎 Rohlík" search link on each unticked row (#31); there a tick means
- * "in the cart".
+ * live for both Members. Tapping the circle ticks; tapping the name opens
+ * the item sheet. A Rohlík trip gets the hand-off card and a "🔎 Rohlík"
+ * search link on each unticked row (#31); there a tick means "in the cart".
+ *
+ * Poor signal (#13, #32): ticks go through the persisted queue in
+ * `~/offline` and show at once (⏳ until the server has them). Without live
+ * data the device's saved copy shows ("Offline · seznam z HH:MM"); offline,
+ * everything but ticking is disabled.
  */
 export function ShoppingList() {
-  const data = useQuery(api.shopping.list, {});
+  const shell = useOfflineShell();
+  const live = useQuery(api.shopping.list, shell ? "skip" : {});
+  const saved = useSavedList();
+  const pending = usePendingTicks();
+  const { connected } = useConnection();
+  const offline = useLocked();
   const refresh = useMutation(api.shopping.refresh);
   useEffect(() => {
     // Brings the list up to date when opened (e.g. after midnight).
-    refresh({}).catch(() => {});
-  }, [refresh]);
-
-  const setChecked = useMutation(api.shopping.setChecked).withOptimisticUpdate(
-    (store, { itemId, checked }) => {
-      const cur = store.getQuery(api.shopping.list, {});
-      if (!cur) return;
-      store.setQuery(api.shopping.list, {}, {
-        ...cur,
-        trips: cur.trips.map((t) => ({
-          ...t,
-          items: t.items.map((i) => (i._id === itemId ? { ...i, checked } : i)),
-        })),
-      });
-    },
-  );
+    if (!shell) refresh({}).catch(() => {});
+  }, [refresh, shell]);
 
   const setPlenty = useMutation(api.ingredients.setPlenty).withOptimisticUpdate(
     (store, { ingredientId, plenty }) => {
@@ -79,16 +85,27 @@ export function ShoppingList() {
     },
   );
 
-  const { flashing, markMine } = useRemoteFlash(data);
-  const [selected, setSelected] = useState<Id<"shoppingTrips"> | null>(null);
+  const { flashing, markMine } = useRemoteFlash(live);
+  const [selected, setSelected] = useState<Id<"shoppingTrips"> | null>(
+    () => lastTrip() as Id<"shoppingTrips"> | null,
+  );
   const [open, setOpen] = useState<Id<"shoppingItems"> | null>(null);
   const [sheet, setSheet] = useState<"addTrip" | "menu" | null>(null);
+
+  // The saved copy stands in until live data comes (quietly, when online).
+  const fromCopy = live === undefined && saved !== null;
+  const base = live ?? (saved ? listFromSaved(saved) : undefined);
+  const data = useMemo(() => base && applyTicks(base, pending), [base, pending]);
+  const locked = offline || fromCopy;
+  const copyNote = fromCopy && (shell || !connected) && (
+    <p className="offline-copy">Offline · seznam z {savedAtLabel(saved.savedAt, Date.now())}</p>
+  );
 
   if (data === undefined) {
     return (
       <section className="page">
         <h1>Nákup</h1>
-        <p className="muted">Načítám…</p>
+        <p className="muted">{shell ? "Bez připojení. Seznam se načte, jakmile bude signál." : "Načítám…"}</p>
       </section>
     );
   }
@@ -96,6 +113,7 @@ export function ShoppingList() {
     return (
       <section className="page">
         <h1>Nákup</h1>
+        {copyNote}
         <div className="card center-text">
           <p className="muted">Zatím není co nakoupit.</p>
           <p className="muted small">
@@ -104,23 +122,28 @@ export function ShoppingList() {
           <Link to="/plan" className="btn primary">
             Otevřít plán
           </Link>
-          <button className="btn" onClick={() => setSheet("addTrip")}>
+          <button className="btn" disabled={locked} onClick={() => setSheet("addTrip")}>
             ＋ Přidat nákup
           </button>
         </div>
-        {sheet === "addTrip" && (
+        {sheet === "addTrip" && !locked && (
           <AddTripSheet
             today={data.today}
             takenDays={new Set()}
             onClose={() => setSheet(null)}
             onAdded={(id) => {
-              setSelected(id);
+              select(id);
               setSheet(null);
             }}
           />
         )}
       </section>
     );
+  }
+
+  function select(id: Id<"shoppingTrips">) {
+    setSelected(id);
+    rememberTrip(id);
   }
 
   const trip =
@@ -130,7 +153,7 @@ export function ShoppingList() {
 
   function tick(item: Item) {
     markMine(item._id);
-    setChecked({ itemId: item._id, checked: !item.checked }).catch(() => {});
+    queueTick(item._id, !item.checked);
   }
   function plenty(ingredientId: Id<"ingredients">, value: boolean) {
     setPlenty({ ingredientId, plenty: value }).catch(() => {});
@@ -139,30 +162,38 @@ export function ShoppingList() {
   return (
     <section className="page shop">
       <h1>Nákup</h1>
+      {copyNote}
       <TripTabs
         trips={data.trips}
         current={trip._id}
-        onSelect={setSelected}
+        locked={locked}
+        onSelect={select}
         onAdd={() => setSheet("addTrip")}
       />
       <TripView
         trip={trip}
         today={data.today}
+        locked={locked}
+        waiting={connected && !shell ? null : pending}
         onMenu={() => setSheet("menu")}
         flashing={flashing}
         onTick={tick}
         onOpen={(i) => setOpen(i._id)}
         onRunningLow={(i) => i.ingredient && plenty(i.ingredient, false)}
       />
-      {open && <ItemSheet itemId={open} onClose={() => setOpen(null)} onPlenty={plenty} />}
-      {sheet === "menu" && <TripMenuSheet trip={trip} today={data.today} onClose={() => setSheet(null)} />}
-      {sheet === "addTrip" && (
+      {open && (
+        <ItemSheet itemId={open} locked={locked} onClose={() => setOpen(null)} onPlenty={plenty} />
+      )}
+      {sheet === "menu" && !locked && (
+        <TripMenuSheet trip={trip} today={data.today} onClose={() => setSheet(null)} />
+      )}
+      {sheet === "addTrip" && !locked && (
         <AddTripSheet
           today={data.today}
           takenDays={new Set(data.trips.map((t) => t.date))}
           onClose={() => setSheet(null)}
           onAdded={(id) => {
-            setSelected(id);
+            select(id);
             setSheet(null);
           }}
         />
@@ -174,11 +205,13 @@ export function ShoppingList() {
 function TripTabs({
   trips,
   current,
+  locked,
   onSelect,
   onAdd,
 }: {
   trips: Trip[];
   current: Id<"shoppingTrips">;
+  locked: boolean;
   onSelect: (id: Id<"shoppingTrips">) => void;
   onAdd: () => void;
 }) {
@@ -207,7 +240,12 @@ function TripTabs({
           </button>
         );
       })}
-      <button className="trip-tab add" aria-label="Přidat nákup" onClick={onAdd}>
+      <button
+        className="trip-tab add"
+        aria-label={locked ? "Přidat nákup – bez připojení" : "Přidat nákup"}
+        disabled={locked}
+        onClick={onAdd}
+      >
         ＋
       </button>
     </div>
@@ -217,6 +255,8 @@ function TripTabs({
 function TripView({
   trip,
   today,
+  locked,
+  waiting,
   onMenu,
   flashing,
   onTick,
@@ -225,6 +265,10 @@ function TripView({
 }: {
   trip: Trip;
   today: string;
+  /** Offline or showing the saved copy: only ticking works. */
+  locked: boolean;
+  /** Ticks to mark ⏳ (not yet on the server); null while connected. */
+  waiting: Ticks | null;
   onMenu: () => void;
   flashing: Set<string>;
   onTick: (item: Item) => void;
@@ -246,7 +290,12 @@ function TripView({
         <span className={`kind${trip.kind === "rohlik" ? " rl" : ""}`}>
           {trip.kind === "rohlik" ? "🚚 Rohlík" : "🛒 Obchod"}
         </span>
-        <button className="icon-btn small" aria-label="Možnosti nákupu" onClick={onMenu}>
+        <button
+          className="icon-btn small"
+          aria-label={locked ? "Možnosti nákupu – bez připojení" : "Možnosti nákupu"}
+          disabled={locked}
+          onClick={onMenu}
+        >
           ⋯
         </button>
       </div>
@@ -258,8 +307,10 @@ function TripView({
         {warnings > 0 && <span className="warn-text"> · ⚠ {warnings} nebude čerstvé</span>}
         {trip.status === "done" && " · nákup hotový"}
       </p>
-      {trip.status === "planned" && trip.date >= today && <AddItem key={trip._id} tripId={trip._id} />}
-      {rohlik && trip.status === "planned" && <RohlikCard date={trip.date} items={trip.items} />}
+      {trip.status === "planned" && trip.date >= today && (
+        <AddItem key={trip._id} tripId={trip._id} locked={locked} />
+      )}
+      {rohlik && trip.status === "planned" && <RohlikCard date={trip.date} items={trip.items} locked={locked} />}
       {groups.length === 0 && plenty.length === 0 && (
         <p className="muted">Na tenhle nákup zatím nic není.</p>
       )}
@@ -283,12 +334,19 @@ function TripView({
                     </span>
                   </button>
                   <button className="nm" onClick={() => onOpen(i)}>
-                    <span className="nmt">{i.label}</span>
+                    <span className="nmt">
+                      {i.label}
+                      {waiting?.[i._id] && (
+                        <span className="pend" role="img" aria-label="čeká na uložení">
+                          ⏳
+                        </span>
+                      )}
+                    </span>
                     {i.note && <span className={`snote ${noteTone(i.note)}`}>{i.note}</span>}
                     <Badges item={i} />
                   </button>
                   <span className={`amt${i.amount === undefined ? " none" : ""}`}>{itemAmount(i)}</span>
-                  {rohlik && !i.checked && (
+                  {rohlik && !i.checked && !locked && (
                     <a
                       className="rlink"
                       href={rohlikSearchUrl(i.label)}
@@ -305,7 +363,9 @@ function TripView({
           </ul>
         </div>
       ))}
-      {plenty.length > 0 && <PlentyBox items={plenty} onOpen={onOpen} onRunningLow={onRunningLow} />}
+      {plenty.length > 0 && (
+        <PlentyBox items={plenty} locked={locked} onOpen={onOpen} onRunningLow={onRunningLow} />
+      )}
     </>
   );
 }
@@ -323,7 +383,7 @@ function Badges({ item }: { item: Item }) {
 }
 
 /** "Add your own item" (#10, #30): a Manual Shopping Item on this trip. */
-function AddItem({ tripId }: { tripId: Id<"shoppingTrips"> }) {
+function AddItem({ tripId, locked }: { tripId: Id<"shoppingTrips">; locked: boolean }) {
   const add = useMutation(api.shopping.addManualItem);
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -331,7 +391,7 @@ function AddItem({ tripId }: { tripId: Id<"shoppingTrips"> }) {
   function submit(e: FormEvent) {
     e.preventDefault();
     const text = label.trim();
-    if (!text) return;
+    if (!text || locked) return;
     setLabel("");
     setError(null);
     add({ tripId, label: text }).catch((err) => {
@@ -347,11 +407,12 @@ function AddItem({ tripId }: { tripId: Id<"shoppingTrips"> }) {
         value={label}
         maxLength={80}
         enterKeyHint="done"
-        placeholder="Přidat vlastní položku (např. toaletní papír)"
+        disabled={locked}
+        placeholder={locked ? "Bez připojení" : "Přidat vlastní položku (např. toaletní papír)"}
         aria-label="Vlastní položka"
         onChange={(e) => setLabel(e.target.value)}
       />
-      <button className="btn" disabled={!label.trim()}>
+      <button className="btn" disabled={locked || !label.trim()}>
         Přidat
       </button>
       {error && <p className="error" role="alert">{error}</p>}
@@ -366,10 +427,12 @@ function AddItem({ tripId }: { tripId: Id<"shoppingTrips"> }) {
  */
 function PlentyBox({
   items,
+  locked,
   onOpen,
   onRunningLow,
 }: {
   items: Item[];
+  locked: boolean;
   onOpen: (item: Item) => void;
   onRunningLow: (item: Item) => void;
 }) {
@@ -395,7 +458,12 @@ function PlentyBox({
                   <button className="nm" onClick={() => onOpen(i)}>
                     {i.label} <small className="muted">{i.amount === undefined ? "" : itemAmount(i)}</small>
                   </button>
-                  <button className="mini" onClick={() => onRunningLow(i)}>
+                  <button
+                    className="mini"
+                    disabled={locked}
+                    aria-label={locked ? `Dochází: ${i.label} – bez připojení` : undefined}
+                    onClick={() => onRunningLow(i)}
+                  >
                     Dochází
                   </button>
                 </li>

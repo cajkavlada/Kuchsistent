@@ -543,3 +543,24 @@ textarea.finput { min-height: 76px; resize: vertical; }
 }
 .ai-steps { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 6px; font-size: .92rem; }
 .ai-prompt { width: 100%; min-height: 220px; font-size: .82rem; line-height: 1.4; resize: vertical; }
+
+/* ---------- poor signal (#13, #32) ---------- */
+.offline-banner {
+  position: sticky; top: 0; z-index: 5; display: flex; justify-content: space-between; gap: .5rem;
+  padding: 4px 16px; background: #44403c; color: #fff; font-size: .8rem; line-height: 1.4;
+}
+.offline-banner b { font-weight: 600; white-space: nowrap; }
+.offline-note {
+  margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--warn); color: var(--warn-ink);
+  font-size: .85rem;
+}
+.content > .offline-note { max-width: 608px; margin: 12px auto 0; }
+.offline-copy {
+  margin: -.25rem 0 0; align-self: flex-start; padding: 2px 10px; border-radius: 999px;
+  background: #e7e5e4; color: #44403c; font-size: .8rem;
+}
+/* Disables every control on the page offline without affecting layout. */
+.offline-lock { display: contents; border: 0; margin: 0; padding: 0; min-width: 0; }
+.offline-lock:disabled :is(button, input, select, textarea, label.check) { opacity: .5; }
+.trip-tab:disabled, .icon-btn:disabled, .mini:disabled { opacity: .45; cursor: default; }
+.pend { display: inline-block; margin-left: 4px; font-size: .8em; text-decoration: none; }

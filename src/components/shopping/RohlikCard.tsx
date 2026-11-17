@@ -7,7 +7,16 @@ import { copyText, handoffLines, type HandoffItem, rohlikPrompt } from "~/lib/ro
  * plain lines, or open the AI-fill sheet with a prompt for ChatGPT with the
  * Rohlík app. Ticking an item on a Rohlík trip means it's in the cart.
  */
-export function RohlikCard({ date, items }: { date: string; items: HandoffItem[] }) {
+export function RohlikCard({
+  date,
+  items,
+  locked = false,
+}: {
+  date: string;
+  items: HandoffItem[];
+  /** Offline (#13): the actions are off, "Bez připojení". */
+  locked?: boolean;
+}) {
   const [copied, flash] = useCopied();
   const [ai, setAi] = useState(false);
   const lines = handoffLines(items);
@@ -23,19 +32,21 @@ export function RohlikCard({ date, items }: { date: string; items: HandoffItem[]
         <b>🚚 Rohlík doručení</b> <small className="muted">– objednávku dokončíš na rohlik.cz</small>
       </p>
       <div className="handoff-btns">
-        <button className="btn rl" disabled={empty} onClick={() => void copyList()}>
+        <button className="btn rl" disabled={empty || locked} onClick={() => void copyList()}>
           {copied ? "✓ Zkopírováno" : "📋 Kopírovat seznam"}
         </button>
-        <button className="btn rl" disabled={empty} onClick={() => setAi(true)}>
+        <button className="btn rl" disabled={empty || locked} onClick={() => setAi(true)}>
           ✨ Naplnit košík s AI
         </button>
       </div>
       <p className="muted small">
-        {empty
+        {locked
+          ? "Bez připojení – Rohlík půjde použít, až bude signál."
+          : empty
           ? "Všechno je v košíku."
           : `${lines.length} ${itemsWord(lines.length)} do košíku. U položek je 🔎 odkaz na hledání. Odškrtni, co máš v košíku.`}
       </p>
-      {ai && <AiFillSheet prompt={rohlikPrompt(date, items)} onClose={() => setAi(false)} />}
+      {ai && !locked && <AiFillSheet prompt={rohlikPrompt(date, items)} onClose={() => setAi(false)} />}
     </div>
   );
 }
